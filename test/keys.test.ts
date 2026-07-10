@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -170,6 +170,43 @@ test("invalid existing state is rejected without regenerating any key", async ()
   const before = await snapshotDirectory(stateDir);
 
   await assert.rejects(() => setupP0({ stateDir, log: () => undefined }), /allow|invalid/i);
+  assertSnapshotsEqual(await snapshotDirectory(stateDir), before);
+});
+
+test("setup rejects reused secret files that are readable by other users", async () => {
+  const root = await makeRoot();
+  const stateDir = path.join(root, "tmp", "p0");
+  await setupP0({ stateDir, log: () => undefined });
+  const publisherPath = path.join(stateDir, "publisher.json");
+  await chmod(publisherPath, 0o644);
+
+  await assert.rejects(() => setupP0({ stateDir, log: () => undefined }), /mode|permission|owner/i);
+  assert.equal((await stat(publisherPath)).mode & 0o777, 0o644);
+});
+
+test("setup rejects symlinks in reused state", async () => {
+  const root = await makeRoot();
+  const stateDir = path.join(root, "tmp", "p0");
+  await setupP0({ stateDir, log: () => undefined });
+  const identityPath = path.join(stateDir, "client-a.identity.json");
+  const outsidePath = path.join(root, "outside.identity.json");
+  await writeFile(outsidePath, await readFile(identityPath));
+  await rm(identityPath);
+  await symlink(outsidePath, identityPath);
+
+  await assert.rejects(() => setupP0({ stateDir, log: () => undefined }), /regular|symlink|state/i);
+});
+
+test("setup rejects copied client identities instead of treating one key as two clients", async () => {
+  const root = await makeRoot();
+  const stateDir = path.join(root, "tmp", "p0");
+  await setupP0({ stateDir, log: () => undefined });
+  const clientAPath = path.join(stateDir, "client-a.identity.json");
+  const clientBPath = path.join(stateDir, "client-b.identity.json");
+  await writeFile(clientBPath, await readFile(clientAPath), { mode: 0o600 });
+  const before = await snapshotDirectory(stateDir);
+
+  await assert.rejects(() => setupP0({ stateDir, log: () => undefined }), /distinct|independent/i);
   assertSnapshotsEqual(await snapshotDirectory(stateDir), before);
 });
 

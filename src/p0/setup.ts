@@ -1,5 +1,6 @@
 import {
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -65,11 +66,35 @@ function validateState(state: P0State): P0State {
   const clientBContact = parseClientContact(state.clientBContact);
   const homeKey = derivePublisherHomeKey(publisher.seed);
 
+  if (clientAIdentity.publicKey === clientBIdentity.publicKey) {
+    throw new Error("client A and client B identities must be distinct");
+  }
   if (clientAContact.homeKey !== homeKey || clientBContact.homeKey !== homeKey) {
     throw new Error("client contact homeKey does not match the publisher seed");
   }
 
   return { publisher, clientAIdentity, clientBIdentity, clientAContact, clientBContact };
+}
+
+async function validateStateFiles(stateDir: string): Promise<void> {
+  const directory = await lstat(stateDir);
+  if (!directory.isDirectory() || directory.isSymbolicLink()) {
+    throw new Error(`P0 state path must be a regular directory: ${stateDir}`);
+  }
+  if (process.platform !== "win32" && (directory.mode & 0o777) !== 0o700) {
+    throw new Error(`P0 state directory must have owner-only permissions: ${stateDir}`);
+  }
+
+  for (const name of expectedFileNames) {
+    const filePath = path.join(stateDir, name);
+    const file = await lstat(filePath);
+    if (!file.isFile() || file.isSymbolicLink()) {
+      throw new Error(`P0 state entry must be a regular file: ${filePath}`);
+    }
+    if (process.platform !== "win32" && (file.mode & 0o777) !== 0o600) {
+      throw new Error(`P0 state file must have owner-only permissions: ${filePath}`);
+    }
+  }
 }
 
 async function readJson(filePath: string): Promise<unknown> {
@@ -81,6 +106,7 @@ async function readJson(filePath: string): Promise<unknown> {
 }
 
 async function readP0State(stateDir: string): Promise<P0State> {
+  await validateStateFiles(stateDir);
   const names = (await readdir(stateDir)).sort();
   if (
     names.length !== expectedFileNames.length ||
