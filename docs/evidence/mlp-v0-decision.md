@@ -15,10 +15,14 @@ Use the [value-gate runbook](../mlp-v0-value-gate-runbook.md) and copy the
 ## Evidence on hand
 
 - P0 shows that the single-desktop Hypertele baseline can persist one Home
-  identity, allow A, deny B, apply an allowlist change without reloading the
-  Home, survive restart, and serve A/B concurrently.
+  identity, allow A, deny B, keep B denied after an on-disk allowlist change,
+  load that change on restart without changing the Home key, and serve A/B
+  concurrently.
 - P0 implementation and evidence are under review in
   [PR #2](https://git.guion.io/neil/kepos-neo/pulls/2).
+- The [existing-product technical baselines](./mlp-v0-existing-product-baselines.md)
+  verify current direct Hypertele and fowl behavior and the documented
+  Tailscale and Headscale authority models. They contain no participant result.
 - The accepted user, demand, and competitor documents state hypotheses and
   thresholds. They are not participant results.
 - Eligible immediate sessions: `0`.
@@ -53,11 +57,11 @@ been recorded.
 
 ## Existing-product verdict
 
-No participant comparison has been run. The accepted competitive analysis
-gives each product a test role, not a winner:
+No participant comparison has been run. Technical checks confirm each
+product's test role, not a winner:
 
 - direct Hypertele is the pinned-key localhost-proxy baseline;
-- `fowl` is the one-time 1:1 sharing baseline;
+- `fowl` is the one-code, durable two-peer session baseline;
 - Tailscale is the mature hosted network baseline;
 - Headscale plus Tailscale is the self-hosted controller baseline.
 

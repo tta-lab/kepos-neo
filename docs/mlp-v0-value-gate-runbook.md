@@ -62,7 +62,7 @@ Use the same job statement for each applicable alternative:
 | Alternative | Question for V0 | Accepted role |
 | --- | --- | --- |
 | Direct Hypertele | Is a pinned key plus one localhost proxy already enough? | Technical and manual-key baseline |
-| `fowl` | Is one-time 1:1 sharing enough, making long-lived trust unnecessary? | Ephemeral-sharing baseline |
+| `fowl` | Is a one-code, durable two-peer session enough, making persistent person trust unnecessary? | Identity-less session baseline |
 | Tailscale Sharing/Serve | Does a mature account/controller and network-first flow already solve the job acceptably? | Mature hosted baseline |
 | Headscale + Tailscale | If self-hosting is acceptable, does a controller-based tailnet remove the need for Kepos? | Self-hosted controller baseline |
 
@@ -251,8 +251,8 @@ The decision record must be one of:
   long-lived trust remains part of the product.
 - `No-go — use Headscale/Tailscale`: the durable need is device-network access
   or an authorization controller is acceptable.
-- `No-go — use fowl`: the durable need is one-time 1:1 sharing rather than
-  long-lived one-to-many trust.
+- `No-go — use fowl`: the need is an identity-less two-peer session rather
+  than persistent person membership or one-to-many trust.
 - `No-go — direct Hypertele is enough`: manual pinned-key localhost proxies
   satisfy the target users without a person/service product layer.
 - `Revise and repeat V0`: evidence supports the job but rejects the proposed
