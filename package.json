@@ -1,0 +1,30 @@
+{
+  "name": "kepos-neo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test",
+    "build:home": "tailwindcss -i home/styles.input.css -o home/styles.css --minify",
+    "p0:setup": "tsx src/p0/setup.ts",
+    "p0:home": "tsx src/home/server.ts",
+    "p0:publisher": "tsx src/p0/publisher.ts",
+    "p0:client": "tsx src/p0/client.ts"
+  },
+  "dependencies": {
+    "hyperdht": "6.20.1",
+    "hypertele": "1.1.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.2",
+    "@types/node": "^26.1.1",
+    "daisyui": "^5.6.16",
+    "tailwindcss": "^4.3.2",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2"
+  }
+}

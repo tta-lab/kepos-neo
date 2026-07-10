@@ -1,0 +1,8 @@
+node_modules/
+tmp/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+*.local.json
