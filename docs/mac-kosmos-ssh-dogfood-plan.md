@@ -68,7 +68,7 @@ request an explicit loopback port while retaining ephemeral port support.
 Verification:
 
 ```sh
-bun run test -- test/config.test.ts test/home.test.ts test/hypertele-process.test.ts
+npm test -- test/config.test.ts test/home.test.ts test/hypertele-process.test.ts
 ```
 
 Commit: `feat(services): add configurable publisher services`
@@ -92,7 +92,7 @@ values only.
 Verification:
 
 ```sh
-bun run test -- test/dogfood-state.test.ts
+npm test -- test/dogfood-state.test.ts
 ```
 
 Commit: `feat(dogfood): add role-separated state setup`
@@ -115,8 +115,8 @@ process and listener.
 Verification:
 
 ```sh
-bun run test -- test/dogfood-runtime.test.ts
-bun run typecheck
+npm test -- test/dogfood-runtime.test.ts
+npm run typecheck
 ```
 
 Commit: `feat(dogfood): run Home and TCP services together`
@@ -135,8 +135,8 @@ cross the second service tunnel, then prove clean shutdown and stable keys.
 Verification:
 
 ```sh
-bun run test -- test/dogfood-smoke.test.ts
-bun run test
+npm test -- test/dogfood-smoke.test.ts
+npm test
 ```
 
 Commit: `test(dogfood): verify concurrent Home and TCP access`

@@ -10,10 +10,10 @@ full Kepos product idea.
 ## Requirements
 
 - Node.js 22
-- Bun 1.3 or later
+- npm 10
 
-Install dependencies with `bun install`. Generate local P0 state with
-`bun run p0:setup`.
+Install dependencies with `npm ci`. Generate local P0 state with
+`npm run p0:setup`.
 
 Generated keys and configs live under `tmp/`. They are secrets: do not commit,
 copy into logs, or share them.
@@ -27,13 +27,13 @@ allowlist.
 Create the client identity on the client:
 
 ```sh
-bun run dogfood:setup-client -- --state tmp/dogfood/client
+npm run dogfood:setup-client -- --state tmp/dogfood/client
 ```
 
 Create publisher state on the publisher, using only the client's public key:
 
 ```sh
-bun run dogfood:setup-publisher -- \
+npm run dogfood:setup-publisher -- \
   --state ~/.local/state/kepos-neo/publisher \
   --display-name kosmos \
   --allow <client-public-key> \
@@ -43,10 +43,10 @@ bun run dogfood:setup-publisher -- \
 Run the publisher, then save its public Home key on the client:
 
 ```sh
-bun run dogfood:publisher -- \
+npm run dogfood:publisher -- \
   --state ~/.local/state/kepos-neo/publisher
 
-bun run dogfood:add-publisher -- \
+npm run dogfood:add-publisher -- \
   --state tmp/dogfood/client \
   --label kosmos \
   --home-key <publisher-home-key>
@@ -55,7 +55,7 @@ bun run dogfood:add-publisher -- \
 Open Home and SSH together on the client:
 
 ```sh
-bun run dogfood:client -- \
+npm run dogfood:client -- \
   --state tmp/dogfood/client \
   --service ssh \
   --port 2222
@@ -66,7 +66,7 @@ ssh -p 2222 <user>@127.0.0.1
 An empty allowlist revokes every client without rotating service keys:
 
 ```sh
-bun run dogfood:set-allow -- \
+npm run dogfood:set-allow -- \
   --state ~/.local/state/kepos-neo/publisher
 ```
 
