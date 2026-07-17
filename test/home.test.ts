@@ -204,6 +204,29 @@ test("Home server serves the health check as plain text", async () => {
   });
 });
 
+test("Home server streams a bounded diagnostics download", async () => {
+  await withHome(async (home) => {
+    const response = await fetch(`${home.url}/.well-known/kepos/benchmark?bytes=1048576`);
+    const body = await response.arrayBuffer();
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "application/octet-stream");
+    assert.equal(response.headers.get("content-length"), "1048576");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("x-kepos-benchmark-bytes"), "1048576");
+    assert.equal(body.byteLength, 1048576);
+  });
+});
+
+test("Home server rejects an oversized diagnostics download", async () => {
+  await withHome(async (home) => {
+    const response = await fetch(`${home.url}/.well-known/kepos/benchmark?bytes=67108865`);
+
+    assert.equal(response.status, 400);
+    assert.match(await response.text(), /bytes/i);
+  });
+});
+
 test("Home server returns plain-text 404 for every other path", async () => {
   await withHome(async (home) => {
     const response = await fetch(`${home.url}/missing`);

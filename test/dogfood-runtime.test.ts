@@ -211,7 +211,7 @@ setInterval(() => {}, 1000);
         serviceId: "ssh",
         localPort: 2222,
         clientEntrypoint,
-        readinessTimeoutMs: 50,
+        readinessTimeoutMs: 250,
         shutdownTimeoutMs: 100,
         fetchRegistry: async () => ({
           schemaVersion: 1,

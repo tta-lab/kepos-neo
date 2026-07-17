@@ -72,3 +72,12 @@ npm run dogfood:set-allow -- \
 
 Publisher seeds and client secret keys never cross devices. See
 `docs/evidence/mac-kosmos-ssh-dogfood.md` for the tested Mac-to-kosmos path.
+
+Home also exposes a bounded download endpoint for transport checks:
+
+```text
+GET /.well-known/kepos/benchmark?bytes=16777216
+```
+
+`bytes` must be from 1 through 67108864. The response is streamed, is not
+cached, and should be used only for diagnostics.

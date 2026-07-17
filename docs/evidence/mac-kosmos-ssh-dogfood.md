@@ -87,6 +87,56 @@ to the supervisor, while still letting systemd kill the whole control group if
 the supervisor cannot finish shutdown. The default control-group mode sends
 SIGTERM directly to each Hypertele child and bypasses clean shutdown.
 
+## Windows public-path observability spike
+
+A later spike moved the publisher side to Windows on the NUC:
+
+```text
+Mac HTTP
+  -> 127.0.0.1:17480
+  -> Hypertele client with `--route public`
+  -> public HyperDHT direct UDP path
+  -> Windows Hypertele server
+  -> Windows Home on 127.0.0.1
+```
+
+The Windows Home key remains
+`6b8da9a3d91aa13f7f6b1ee66b5a15d8adce9cf16936f3dd8be81391b6acfc55`.
+Its separate Windows SSH key is
+`38c63a7d22a6d0531f2a81e4f741c45753a01446c193b558e62606768292cb4c`.
+No seed or private key is recorded here.
+
+Hypertele now records connection attempts, DHT and Noise handshake time,
+readiness-probe time, first-byte time, transfer time, byte counts, and
+effective transfer rate. It retries a failed handshake or readiness probe
+before consuming the pending local TCP request. The observed samples all
+succeeded on their first application-level attempt, so retry behavior is
+proved by automated tests rather than by a forced live failure.
+
+The final samples forced `--route public`. They reached the Windows peer at
+public address `125.110.47.243`, and HyperDHT reported zero relay attempts.
+
+| Sample | DHT handshake | Probe | Home first byte after ready | Transfer | Established rate | Total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| health, cold | 2.37 s | 15 ms | 18 ms | — | — | 2.41 s |
+| health, one-second gap | 16 ms | 9 ms | 8 ms | — | — | 34 ms |
+| health, four-second gap | 4.19 s | 416 ms | 826 ms | — | — | 5.43 s |
+| 16 MiB, cold | 6.59 s | 445 ms | 1.58 s | 4.78 s | 3.51 MB/s | 13.39 s |
+| 64 MiB, cold | 5.11 s | 441 ms | 2.42 s | 16.31 s | 4.11 MB/s | 24.28 s |
+
+The aggregate curl rates, which include setup and first-byte delay, were
+1.25 MB/s for 16 MiB and 2.76 MB/s for 64 MiB.
+
+HyperDHT keeps a reusable UDP route for three seconds after a connection
+closes. This matches the observed 34 ms request after a one-second gap and the
+return to multi-second setup after a four-second gap. Its
+`connectionKeepAlive` setting applies to a connection that is still open; it
+does not extend this route-cache window.
+
+The main delay is public route discovery and hole punching, not steady-state
+transfer. Once established, this path moved large responses at roughly
+3.5–4.1 MB/s in the final forced-public samples.
+
 ## Deployment status
 
 The live kosmos deployment is deliberately transient:

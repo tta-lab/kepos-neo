@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,6 +14,9 @@ import {
 
 const host = "127.0.0.1" as const;
 const registryPath = "/.well-known/kepos/services.json";
+const benchmarkPath = "/.well-known/kepos/benchmark";
+const benchmarkChunk = Buffer.alloc(64 * 1024);
+const maxBenchmarkBytes = 64 * 1024 * 1024;
 const defaultHomeDirectory = fileURLToPath(new URL("../../home/", import.meta.url));
 
 export interface RunningHomeServer {
@@ -63,6 +67,25 @@ function send(
   response.end(body);
 }
 
+async function sendBenchmark(response: ServerResponse, bytes: number): Promise<void> {
+  response.writeHead(200, {
+    "cache-control": "no-store",
+    "content-length": String(bytes),
+    "content-type": "application/octet-stream",
+    "x-kepos-benchmark-bytes": String(bytes),
+  });
+
+  let remaining = bytes;
+  while (remaining > 0) {
+    const size = Math.min(remaining, benchmarkChunk.byteLength);
+    if (!response.write(benchmarkChunk.subarray(0, size))) {
+      await once(response, "drain");
+    }
+    remaining -= size;
+  }
+  response.end();
+}
+
 export async function startHomeServer({
   homeKey,
   port = 0,
@@ -78,7 +101,8 @@ export async function startHomeServer({
   ]);
 
   const server = createServer((request, response) => {
-    const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const { pathname } = url;
 
     if (request.method !== "GET") {
       send(response, 404, "text/plain; charset=utf-8", "Not Found\n");
@@ -110,6 +134,25 @@ export async function startHomeServer({
     }
     if (pathname === "/healthz") {
       send(response, 200, "text/plain; charset=utf-8", "ok\n");
+      return;
+    }
+    if (pathname === benchmarkPath) {
+      const rawBytes = url.searchParams.get("bytes");
+      const bytes = Number(rawBytes);
+      if (
+        rawBytes === null ||
+        !/^\d+$/.test(rawBytes) ||
+        !Number.isSafeInteger(bytes) ||
+        bytes < 1 ||
+        bytes > maxBenchmarkBytes
+      ) {
+        send(response, 400, "text/plain; charset=utf-8", "bytes must be an integer from 1 through 67108864\n");
+        return;
+      }
+
+      void sendBenchmark(response, bytes).catch((error: unknown) => {
+        response.destroy(error instanceof Error ? error : new Error(String(error)));
+      });
       return;
     }
 
