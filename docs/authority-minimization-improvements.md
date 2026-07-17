@@ -109,21 +109,21 @@ MLP 后第一个实际改进应是 QR 加短指纹核对。不要先建设全局
 
 每个 service 保存自己的 peer-key 集合。
 
-优点：简单、直观、仍以 publisher 本地状态为 SSOT。  
+优点：简单、直观、仍以 publisher 本地状态为 SSOT。
 缺点：服务多时重复配置，关系变更需要批量更新。
 
 #### 方案 B：本地 group 加每服务引用
 
 Publisher 本地定义 `family`、`friends` 等 group，service 引用 group 或 peer。
 
-优点：减少重复，仍不需要中心 controller。  
+优点：减少重复，仍不需要中心 controller。
 缺点：开始形成本地 RBAC，需要控制范围。
 
 #### 方案 C：签名 capability grant
 
 Owner 为 peer 签发带 service、权限、有效期和 session ID 的 grant，publisher 在连接时验证。
 
-优点：适合邀请、临时 session 和离线传递。  
+优点：适合邀请、临时 session 和离线传递。
 缺点：撤销、时钟、重放、续期和密钥轮换明显更复杂。
 
 ### 建议
