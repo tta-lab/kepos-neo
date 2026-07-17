@@ -4,13 +4,24 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { createHomeRegistry } from "../src/home/registry.js";
-import { parseHomeCliOptions, startHomeServer } from "../src/home/server.js";
+import * as homeServerModule from "../src/home/server.js";
+
+const { startHomeServer } = homeServerModule;
 
 const homeKey = "ab".repeat(32);
 const sshKey = "cd".repeat(32);
 
 test("Home CLI accepts a fixed loopback port", () => {
-  assert.deepEqual(parseHomeCliOptions(["publisher.json", "--port", "18080"]), {
+  const parseHomeCliOptions = (
+    homeServerModule as typeof homeServerModule & {
+      parseHomeCliOptions?: (arguments_: readonly string[]) => {
+        publisherPath: string;
+        port: number;
+      };
+    }
+  ).parseHomeCliOptions;
+  assert.equal(typeof parseHomeCliOptions, "function");
+  assert.deepEqual(parseHomeCliOptions?.(["publisher.json", "--port", "18080"]), {
     publisherPath: path.resolve("publisher.json"),
     port: 18080,
   });
@@ -18,7 +29,7 @@ test("Home CLI accepts a fixed loopback port", () => {
 
 test("Home CLI rejects an invalid fixed port", () => {
   assert.throws(
-    () => parseHomeCliOptions(["publisher.json", "--port", "not-a-port"]),
+    () => homeServerModule.parseHomeCliOptions(["publisher.json", "--port", "not-a-port"]),
     /port/i,
   );
 });
