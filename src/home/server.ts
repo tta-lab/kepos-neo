@@ -29,6 +29,26 @@ export interface StartHomeServerOptions {
   services?: HomeRegistryService[];
 }
 
+export interface HomeCliOptions {
+  publisherPath: string;
+  port: number;
+}
+
+export function parseHomeCliOptions(arguments_: readonly string[]): HomeCliOptions {
+  const publisherPath = path.resolve(arguments_[0] ?? path.join("tmp", "p0", "publisher.json"));
+  if (arguments_.length <= 1) return { publisherPath, port: 0 };
+  if (arguments_[1] !== "--port" || arguments_.length !== 3) {
+    throw new Error("Home CLI accepts only --port after the publisher path");
+  }
+
+  const port = Number(arguments_[2]);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error("port must be an integer from 0 through 65535");
+  }
+
+  return { publisherPath, port };
+}
+
 function send(
   response: ServerResponse,
   statusCode: number,
@@ -122,9 +142,9 @@ export async function startHomeServer({
 }
 
 async function runHomeCli(): Promise<void> {
-  const publisherPath = path.resolve(process.argv[2] ?? path.join("tmp", "p0", "publisher.json"));
+  const { publisherPath, port } = parseHomeCliOptions(process.argv.slice(2));
   const publisher = parsePublisherConfig(JSON.parse(await readFile(publisherPath, "utf8")) as unknown);
-  const home = await startHomeServer({ homeKey: derivePublisherHomeKey(publisher.seed) });
+  const home = await startHomeServer({ homeKey: derivePublisherHomeKey(publisher.seed), port });
   console.log(`Home ready @${home.url}`);
 }
 

@@ -1,12 +1,38 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { test } from "node:test";
 
 import { createHomeRegistry } from "../src/home/registry.js";
-import { startHomeServer } from "../src/home/server.js";
+import * as homeServerModule from "../src/home/server.js";
+
+const { startHomeServer } = homeServerModule;
 
 const homeKey = "ab".repeat(32);
 const sshKey = "cd".repeat(32);
+
+test("Home CLI accepts a fixed loopback port", () => {
+  const parseHomeCliOptions = (
+    homeServerModule as typeof homeServerModule & {
+      parseHomeCliOptions?: (arguments_: readonly string[]) => {
+        publisherPath: string;
+        port: number;
+      };
+    }
+  ).parseHomeCliOptions;
+  assert.equal(typeof parseHomeCliOptions, "function");
+  assert.deepEqual(parseHomeCliOptions?.(["publisher.json", "--port", "18080"]), {
+    publisherPath: path.resolve("publisher.json"),
+    port: 18080,
+  });
+});
+
+test("Home CLI rejects an invalid fixed port", () => {
+  assert.throws(
+    () => homeServerModule.parseHomeCliOptions(["publisher.json", "--port", "not-a-port"]),
+    /port/i,
+  );
+});
 
 test("Home Registry has the P0 schema and binds its service to the Home key", () => {
   const registry = createHomeRegistry(homeKey);
