@@ -18,10 +18,12 @@
 当前第一目标不是完成理想安全模型，而是证明：
 
 1. 真实设备能在目标网络中连接；
-2. Home 和命名服务足够快、稳定；
+2. direct path 的额外延迟接近零，relay 路径仍能支持流畅交互；
 3. 用户能在不理解 key、端口、NAT 和 relay 的情况下完成任务；
 4. 失败原因可诊断；
 5. 真实用户愿意持续使用。
+
+“连得上”不是单独的成功标准。若 p95 RTT、抖动、首次响应时间或切网恢复时间让 SSH、网页和实时会话明显迟钝，这条路径应判为不可用。每种 carrier 都应与同一对设备的原始网络路径比较，而不是只看隧道是否建立。
 
 只有会破坏基本信任边界的安全问题应阻塞可用性工作。其余改进按以下问题触发：
 
@@ -358,16 +360,18 @@ session_revoked
 以下顺序是讨论建议，不是已接受 roadmap：
 
 1. 保持当前静态 publisher-wide allowlist，完成真实 direct P2P、one-to-many 和长期服务验证；
-2. 测量连接时间、持续吞吐、网络切换和国内多运营商成功率；
-3. 优化 Home、命名服务、错误提示和首次连接 UX；
-4. 用 QR 降低 pairing 操作成本，按风险提供短指纹核对；
-5. 验证有基本 admission、quota 和诊断的非托管 UDP blind relay；
-6. 如果 UDP 覆盖不足，优先建设保持 inner Noise 的 TCP/TLS 或 WSS relay；
-7. 只有权限过宽阻止用户建立 trust 时，才增加 per-service allowlist；
-8. 只有重启影响长期服务或紧急撤销时，才实现授权热加载；
-9. 在多设备、关联隐私或 key 轮换需求出现后再考虑 Person root 和 pairwise key；
-10. 在自动更新成为正式产品路径后再加固发布信任；
-11. 只有临时邀请和 named session 被用户证明后，再设计 signed capability。
+2. 以原始网络路径为基线，测量 direct 和 relay 的 p50/p95 RTT、额外 RTT、抖动、首次响应时间和切网恢复时间；
+3. 优先消除绕路、慢打洞和不必要的中继；延迟不达标时，不进入安全扩展工作；
+4. 测量持续吞吐和国内多运营商成功率；
+5. 优化 Home、命名服务、错误提示和首次连接 UX；
+6. 用 QR 降低 pairing 操作成本，按风险提供短指纹核对；
+7. 验证有基本 admission、quota 和诊断的非托管 UDP blind relay；
+8. 如果 UDP 覆盖不足，优先建设保持 inner Noise 的 TCP/TLS 或 WSS relay；
+9. 只有权限过宽阻止用户建立 trust 时，才增加 per-service allowlist；
+10. 只有重启影响长期服务或紧急撤销时，才实现授权热加载；
+11. 在多设备、关联隐私或 key 轮换需求出现后再考虑 Person root 和 pairwise key；
+12. 在自动更新成为正式产品路径后再加固发布信任；
+13. 只有临时邀请和 named session 被用户证明后，再设计 signed capability。
 
 ## 17. 明确不做
 
@@ -379,4 +383,5 @@ session_revoked
 - 不因为使用 TLS/443 就把 gateway 当成可信 endpoint；
 - 不把静态 peer key 包装成已经解决的 Person identity；
 - 不在缺少真实需求时建设完整 RBAC、PKI 或 capability language；
+- 不把“隧道建立成功”当作性能合格；
 - 不让安全模型工作持续推迟 direct path、relay、国内网络验证或真实用户 UX。
