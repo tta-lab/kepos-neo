@@ -5,7 +5,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parsePublisherConfig } from "../config.js";
 import { derivePublisherHomeKey } from "../keys.js";
-import { createHomeRegistry } from "./registry.js";
+import {
+  createHomeRegistry,
+  type CreateHomeRegistryOptions,
+  type HomeRegistryService,
+} from "./registry.js";
 
 const host = "127.0.0.1" as const;
 const registryPath = "/.well-known/kepos/services.json";
@@ -21,6 +25,8 @@ export interface RunningHomeServer {
 export interface StartHomeServerOptions {
   homeKey: string;
   port?: number;
+  displayName?: string;
+  services?: HomeRegistryService[];
 }
 
 function send(
@@ -40,8 +46,11 @@ function send(
 export async function startHomeServer({
   homeKey,
   port = 0,
+  displayName = "Local Publisher",
+  services = [],
 }: StartHomeServerOptions): Promise<RunningHomeServer> {
-  const registry = createHomeRegistry(homeKey);
+  const registryOptions: CreateHomeRegistryOptions = { displayName, services };
+  const registry = createHomeRegistry(homeKey, registryOptions);
   const registryEtag = `"${registry.revision}"`;
   const [homeHtml, homeCss] = await Promise.all([
     readFile(path.join(defaultHomeDirectory, "index.html")),

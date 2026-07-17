@@ -17,3 +17,58 @@ Install dependencies with `bun install`. Generate local P0 state with
 
 Generated keys and configs live under `tmp/`. They are secrets: do not commit,
 copy into logs, or share them.
+
+## Home plus TCP dogfood
+
+The dogfood path keeps Home and a selected TCP service available at the same
+time. It uses one Hypertele process per service and one shared publisher
+allowlist.
+
+Create the client identity on the client:
+
+```sh
+bun run dogfood:setup-client -- --state tmp/dogfood/client
+```
+
+Create publisher state on the publisher, using only the client's public key:
+
+```sh
+bun run dogfood:setup-publisher -- \
+  --state ~/.local/state/kepos-neo/publisher \
+  --display-name kosmos \
+  --allow <client-public-key> \
+  --service ssh:SSH:22
+```
+
+Run the publisher, then save its public Home key on the client:
+
+```sh
+bun run dogfood:publisher -- \
+  --state ~/.local/state/kepos-neo/publisher
+
+bun run dogfood:add-publisher -- \
+  --state tmp/dogfood/client \
+  --label kosmos \
+  --home-key <publisher-home-key>
+```
+
+Open Home and SSH together on the client:
+
+```sh
+bun run dogfood:client -- \
+  --state tmp/dogfood/client \
+  --service ssh \
+  --port 2222
+
+ssh -p 2222 <user>@127.0.0.1
+```
+
+An empty allowlist revokes every client without rotating service keys:
+
+```sh
+bun run dogfood:set-allow -- \
+  --state ~/.local/state/kepos-neo/publisher
+```
+
+Publisher seeds and client secret keys never cross devices. See
+`docs/evidence/mac-kosmos-ssh-dogfood.md` for the tested Mac-to-kosmos path.

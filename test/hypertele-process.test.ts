@@ -110,13 +110,33 @@ test("builds a loopback-only publisher command with an explicit test bootstrap",
   );
 });
 
-test("builds a client command that always requests an ephemeral loopback port", async () => {
+test("builds a client command with an ephemeral loopback port by default", async () => {
   const { buildClientArguments } = await loadProcessModule();
   const homeKey = "11".repeat(32);
 
   assert.deepEqual(
     buildClientArguments({ identityPath: "/tmp/client.json", homeKey }),
     ["-p", "0", "--address", "127.0.0.1", "-i", "/tmp/client.json", "-s", homeKey],
+  );
+});
+
+test("builds a client command with an explicit loopback port", async () => {
+  const { buildClientArguments } = await loadProcessModule();
+  const homeKey = "11".repeat(32);
+
+  assert.deepEqual(
+    buildClientArguments({ identityPath: "/tmp/client.json", homeKey, localPort: 2222 }),
+    ["-p", "2222", "--address", "127.0.0.1", "-i", "/tmp/client.json", "-s", homeKey],
+  );
+});
+
+test("rejects an invalid requested client port", async () => {
+  const { buildClientArguments } = await loadProcessModule();
+  const homeKey = "11".repeat(32);
+
+  assert.throws(
+    () => buildClientArguments({ identityPath: "/tmp/client.json", homeKey, localPort: -1 }),
+    /localPort/i,
   );
 });
 

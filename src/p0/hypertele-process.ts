@@ -28,6 +28,7 @@ export interface PublisherArgumentsOptions {
 export interface ClientArgumentsOptions {
   identityPath: string;
   homeKey: string;
+  localPort?: number;
   testBootstrapPort?: number;
 }
 
@@ -75,6 +76,13 @@ function parsePort(value: number, field: string): number {
   return value;
 }
 
+function parseLocalPort(value: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > 65_535) {
+    throw new Error("localPort must be an integer from 0 through 65535");
+  }
+  return value;
+}
+
 function appendTestBootstrap(arguments_: string[], testBootstrapPort?: number): void {
   if (testBootstrapPort === undefined) {
     return;
@@ -116,7 +124,7 @@ export function buildClientArguments(options: ClientArgumentsOptions): string[] 
 
   const arguments_ = [
     "-p",
-    "0",
+    String(parseLocalPort(options.localPort ?? 0)),
     "--address",
     loopbackAddress,
     "-i",

@@ -1,0 +1,17 @@
+[Unit]
+Description=Kepos Neo dogfood publisher
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/neil/.local/share/kepos-neo-dogfood
+Environment=PATH=/run/current-system/sw/bin:/usr/bin:/bin
+ExecStart=/run/current-system/sw/bin/bun run dogfood:publisher -- --state /home/neil/.local/state/kepos-neo/publisher
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

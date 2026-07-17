@@ -6,6 +6,7 @@ import { createHomeRegistry } from "../src/home/registry.js";
 import { startHomeServer } from "../src/home/server.js";
 
 const homeKey = "ab".repeat(32);
+const sshKey = "cd".repeat(32);
 
 test("Home Registry has the P0 schema and binds its service to the Home key", () => {
   const registry = createHomeRegistry(homeKey);
@@ -34,6 +35,72 @@ test("Home Registry has the P0 schema and binds its service to the Home key", ()
 
 test("Home Registry rejects a malformed Home key", () => {
   assert.throws(() => createHomeRegistry("not-a-home-key"), /home key/i);
+});
+
+test("Home Registry lists configured TCP services without publisher-local targets", () => {
+  const registry = createHomeRegistry(homeKey, {
+    displayName: "kosmos",
+    services: [{ id: "ssh", name: "SSH", kind: "tcp", serviceKey: sshKey }],
+  });
+
+  assert.deepEqual(registry, {
+    schemaVersion: 1,
+    revision: 1,
+    publisher: { displayName: "kosmos" },
+    services: [
+      { id: "home", name: "Home", kind: "http", serviceKey: homeKey },
+      { id: "ssh", name: "SSH", kind: "tcp", serviceKey: sshKey },
+    ],
+  });
+  const serialized = JSON.stringify(registry);
+  for (const forbidden of ["targetPort", "targetHost", "config", "seed", "secret"]) {
+    assert.equal(serialized.includes(`"${forbidden}"`), false, forbidden);
+  }
+});
+
+test("Home Registry rejects duplicate, reserved, or malformed public services", () => {
+  const ssh = { id: "ssh", name: "SSH", kind: "tcp" as const, serviceKey: sshKey };
+
+  assert.throws(
+    () => createHomeRegistry(homeKey, { displayName: "kosmos", services: [ssh, ssh] }),
+    /duplicate|service/i,
+  );
+  assert.throws(
+    () =>
+      createHomeRegistry(homeKey, {
+        displayName: "kosmos",
+        services: [{ ...ssh, id: "home" }],
+      }),
+    /reserved|service/i,
+  );
+  assert.throws(
+    () =>
+      createHomeRegistry(homeKey, {
+        displayName: "kosmos",
+        services: [{ ...ssh, serviceKey: "bad" }],
+      }),
+    /serviceKey|key/i,
+  );
+});
+
+test("Home server exposes the configured Registry", async () => {
+  const home = await startHomeServer({
+    homeKey,
+    displayName: "kosmos",
+    services: [{ id: "ssh", name: "SSH", kind: "tcp", serviceKey: sshKey }],
+  });
+  try {
+    const response = await fetch(`${home.url}/.well-known/kepos/services.json`);
+    assert.deepEqual(
+      await response.json(),
+      createHomeRegistry(homeKey, {
+        displayName: "kosmos",
+        services: [{ id: "ssh", name: "SSH", kind: "tcp", serviceKey: sshKey }],
+      }),
+    );
+  } finally {
+    await home.close();
+  }
 });
 
 async function withHome(run: (home: Awaited<ReturnType<typeof startHomeServer>>) => Promise<void>): Promise<void> {

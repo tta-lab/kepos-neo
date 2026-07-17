@@ -13,7 +13,13 @@
     "p0:setup": "tsx src/p0/setup.ts",
     "p0:home": "tsx src/home/server.ts",
     "p0:publisher": "tsx src/p0/publisher.ts",
-    "p0:client": "tsx src/p0/client.ts"
+    "p0:client": "tsx src/p0/client.ts",
+    "dogfood:setup-client": "tsx src/dogfood/setup-client.ts",
+    "dogfood:setup-publisher": "tsx src/dogfood/setup-publisher.ts",
+    "dogfood:add-publisher": "tsx src/dogfood/contact.ts",
+    "dogfood:set-allow": "tsx src/dogfood/allow.ts",
+    "dogfood:publisher": "tsx src/dogfood/publisher.ts",
+    "dogfood:client": "tsx src/dogfood/client.ts"
   },
   "dependencies": {
     "hyperdht": "6.20.1",

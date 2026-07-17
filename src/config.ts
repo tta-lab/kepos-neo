@@ -9,7 +9,23 @@ export interface ClientContact {
   requestedLocalPort: number;
 }
 
+export interface PublisherService {
+  id: string;
+  name: string;
+  kind: "tcp";
+  targetPort: number;
+  config: string;
+}
+
+export interface PublisherManifest {
+  displayName: string;
+  homeConfig: string;
+  services: PublisherService[];
+}
+
 const keyHexPattern = /^[0-9a-f]{64}$/;
+const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
+const publisherConfigFilePattern = /^[a-z0-9][a-z0-9.-]*\.publisher\.json$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -23,14 +39,43 @@ function parseKeyHex(value: unknown, field: string): string {
   return value;
 }
 
+function rejectUnknownFields(
+  value: Record<string, unknown>,
+  allowedFields: readonly string[],
+  subject: string,
+): void {
+  const unknownField = Object.keys(value).find((field) => !allowedFields.includes(field));
+  if (unknownField) {
+    throw new Error(`${subject} has unknown field: ${unknownField}`);
+  }
+}
+
+function parseNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${field} must be a non-empty string`);
+  }
+  return value;
+}
+
+function parseTargetPort(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65_535) {
+    throw new Error("targetPort must be an integer from 1 through 65535");
+  }
+  return value;
+}
+
+function parsePublisherConfigFile(value: unknown, field: string): string {
+  if (typeof value !== "string" || !publisherConfigFilePattern.test(value)) {
+    throw new Error(`${field} must be a safe *.publisher.json filename`);
+  }
+  return value;
+}
+
 export function parsePublisherConfig(value: unknown): PublisherConfig {
   if (!isRecord(value)) {
     throw new Error("publisher config must be an object");
   }
-  const unknownFields = Object.keys(value).filter((field) => field !== "seed" && field !== "allow");
-  if (unknownFields.length > 0) {
-    throw new Error(`publisher config has unknown field: ${unknownFields[0]}`);
-  }
+  rejectUnknownFields(value, ["seed", "allow"], "publisher config");
 
   const seed = parseKeyHex(value.seed, "seed");
   if (!Array.isArray(value.allow)) {
@@ -72,4 +117,58 @@ export function parseClientContact(value: unknown): ClientContact {
 
 export function serializeClientContact(contact: ClientContact): string {
   return `${JSON.stringify(parseClientContact(contact), null, 2)}\n`;
+}
+
+export function parsePublisherManifest(value: unknown): PublisherManifest {
+  if (!isRecord(value)) {
+    throw new Error("publisher manifest must be an object");
+  }
+  rejectUnknownFields(value, ["displayName", "homeConfig", "services"], "publisher manifest");
+
+  const displayName = parseNonEmptyString(value.displayName, "displayName");
+  const homeConfig = parsePublisherConfigFile(value.homeConfig, "homeConfig");
+  if (!Array.isArray(value.services)) {
+    throw new Error("services must be an array");
+  }
+
+  const seenIds = new Set<string>();
+  const services = value.services.map((entry, index): PublisherService => {
+    if (!isRecord(entry)) {
+      throw new Error(`services[${index}] must be an object`);
+    }
+    rejectUnknownFields(
+      entry,
+      ["id", "name", "kind", "targetPort", "config"],
+      `services[${index}]`,
+    );
+
+    if (typeof entry.id !== "string" || !serviceIdPattern.test(entry.id)) {
+      throw new Error(`services[${index}].id must be a lowercase service identifier`);
+    }
+    if (entry.id === "home") {
+      throw new Error(`services[${index}].id uses reserved service id home`);
+    }
+    if (seenIds.has(entry.id)) {
+      throw new Error(`duplicate service id: ${entry.id}`);
+    }
+    seenIds.add(entry.id);
+
+    if (entry.kind !== "tcp") {
+      throw new Error(`services[${index}].kind must be tcp`);
+    }
+
+    return {
+      id: entry.id,
+      name: parseNonEmptyString(entry.name, `services[${index}].name`),
+      kind: entry.kind,
+      targetPort: parseTargetPort(entry.targetPort),
+      config: parsePublisherConfigFile(entry.config, `services[${index}].config`),
+    };
+  });
+
+  return { displayName, homeConfig, services };
+}
+
+export function serializePublisherManifest(manifest: PublisherManifest): string {
+  return `${JSON.stringify(parsePublisherManifest(manifest), null, 2)}\n`;
 }

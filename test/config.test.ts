@@ -3,8 +3,10 @@ import { test } from "node:test";
 
 import {
   parseClientContact,
+  parsePublisherManifest,
   parsePublisherConfig,
   serializeClientContact,
+  serializePublisherManifest,
   serializePublisherConfig,
 } from "../src/config.js";
 
@@ -93,5 +95,93 @@ test("client contact rejects an invalid requested local port", () => {
   assert.throws(
     () => parseClientContact({ homeKey: publicKey, label: "Publisher", requestedLocalPort: -1 }),
     /requestedLocalPort/i,
+  );
+});
+
+test("publisher manifest round-trips Home and configurable loopback TCP services", () => {
+  const manifest = {
+    displayName: "kosmos",
+    homeConfig: "home.publisher.json",
+    services: [
+      {
+        id: "ssh",
+        name: "SSH",
+        kind: "tcp" as const,
+        targetPort: 22,
+        config: "ssh.publisher.json",
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    parsePublisherManifest(JSON.parse(serializePublisherManifest(manifest))),
+    manifest,
+  );
+});
+
+test("publisher manifest rejects duplicate, reserved, or unsafe service identifiers", () => {
+  const service = {
+    id: "ssh",
+    name: "SSH",
+    kind: "tcp",
+    targetPort: 22,
+    config: "ssh.publisher.json",
+  };
+
+  for (const services of [
+    [service, service],
+    [{ ...service, id: "home" }],
+    [{ ...service, id: "../ssh" }],
+  ]) {
+    assert.throws(
+      () =>
+        parsePublisherManifest({
+          displayName: "kosmos",
+          homeConfig: "home.publisher.json",
+          services,
+        }),
+      /service|id|duplicate|reserved/i,
+    );
+  }
+});
+
+test("publisher manifest rejects arbitrary targets and unsafe config paths", () => {
+  const base = {
+    displayName: "kosmos",
+    homeConfig: "home.publisher.json",
+    services: [
+      {
+        id: "ssh",
+        name: "SSH",
+        kind: "tcp",
+        targetPort: 22,
+        config: "ssh.publisher.json",
+      },
+    ],
+  };
+
+  assert.throws(
+    () =>
+      parsePublisherManifest({
+        ...base,
+        services: [{ ...base.services[0], targetHost: "0.0.0.0" }],
+      }),
+    /field|targetHost/i,
+  );
+  assert.throws(
+    () =>
+      parsePublisherManifest({
+        ...base,
+        services: [{ ...base.services[0], config: "../ssh.publisher.json" }],
+      }),
+    /config/i,
+  );
+  assert.throws(
+    () =>
+      parsePublisherManifest({
+        ...base,
+        services: [{ ...base.services[0], targetPort: 0 }],
+      }),
+    /targetPort/i,
   );
 });
