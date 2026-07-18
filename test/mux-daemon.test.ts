@@ -171,6 +171,15 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     const repeated = await fetch(`${subscriber.home.url}/healthz`);
     assert.equal(repeated.status, 200);
     assert.equal(publisher.acceptedConnections(), 1);
+    assert.equal(
+      subscriberEvents.filter(({ event }) => event === "outer.connected")
+        .length,
+      1,
+    );
+    assert.ok(
+      subscriberEvents.filter(({ event }) => event === "channel.open-ok")
+        .length >= 3,
+    );
 
     const subscriberConnected = subscriberEvents.find(
       ({ event }) => event === "outer.connected",

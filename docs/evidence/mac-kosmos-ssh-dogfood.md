@@ -1,17 +1,20 @@
-# Mac to kosmos SSH dogfood evidence
+# Mac to kosmos transport evidence
 
-Date: 2026-07-17
+Dates: 2026-07-17 and 2026-07-18
 
-The public-path samples below record the earlier one-process-per-service
-dogfood. The current branch replaces that runtime with one persistent
-Protomux connection while keeping the P0 tests as historical fixtures.
+The first section records the current persistent Protomux runtime. Later
+sections retain the earlier one-process-per-service Hypertele evidence for
+history.
 
 ## Persistent multiplex proof
 
-The current isolated-DHT suite proves:
+Source commit: `7b9f7b9`.
+
+The current isolated-DHT suite and the 2026-07-18 Mac-to-kosmos-wsl sample
+prove:
 
 - one subscriber connection carries Home, a Navidrome-like HTTP stream, and
-  an SSH-like half-closed TCP exchange concurrently;
+  a real OpenSSH session;
 - each actual TCP connection has an independent Protomux channel;
 - closing one channel does not close the publisher connection;
 - one publisher accepts several allowlisted subscribers concurrently;
@@ -21,8 +24,60 @@ The current isolated-DHT suite proves:
 - active TCP stream recovery after a dropped outer connection remains
   deferred.
 
-This proof is automated. A new cross-building public-path sample for the mux
-runtime has not yet been recorded.
+### LAN `auto`
+
+The publisher and subscriber both ran on the Mac with the normal public
+HyperDHT bootstrap. `auto` selected a private-address path. Discovery and the
+first handshake took 9.58 seconds, but the persistent connection then served
+two Home requests without another outer handshake:
+
+| Request | HTTP | First byte | Total |
+| --- | ---: | ---: | ---: |
+| Home health | 200 | 11 ms | 12 ms |
+| repeated Home health | 200 | 5 ms | 5 ms |
+
+The slow first connection and fast channels are separate facts: LAN transport
+does not make first-time DHT discovery instant.
+
+### Non-local `public`
+
+The publisher ran on kosmos-wsl with Node 22.20.0. The Mac subscriber used
+`--route public`, which disables HyperDHT's LAN shortcut. The sanitized
+snapshot showed a public IPv4 endpoint; this does not prove a relay or fixed
+route. The one outer handshake took 2.47 seconds.
+
+| Service | Result | First byte / command time |
+| --- | --- | ---: |
+| Home health | HTTP 200 | 1.03 s |
+| repeated Home health | HTTP 200 | 0.94 s |
+| Navidrome `/ping` | HTTP 200 | 1.04 s |
+| OpenSSH command | `public-mux-ssh-ok` | 4.55 s |
+
+All channel events in this run shared one outer ID. The publisher emitted one
+`outer.accepted` and one `outer.connected`; opening Home twice, Navidrome, and
+SSH did not create more DHT handshakes.
+
+The first SSH attempt was dropped by the target sshd before key exchange.
+The sshd journal reported a temporary `PerSourcePenalties` /
+`exceeded LoginGraceTime` drop for its loopback source. A retry through the
+same Kepos path completed a real OpenSSH command, so that first failure is not
+attributed to the mux.
+
+### Reconnect with stable listeners
+
+The publisher was stopped while the subscriber stayed up. The subscriber
+reported `outer.closed`, four failed recovery attempts, and
+`outer.restored` on recovery attempt 5 after 45.05 seconds. The same local
+ports remained bound:
+
+- Home: the original generated URL returned HTTP 200 in 1.14 seconds;
+- Navidrome: `127.0.0.1:14533/ping` returned HTTP 200 in 1.14 seconds;
+- SSH: `127.0.0.1:2222` returned `mux-ssh-after-reconnect-ok`.
+
+This is one acceptance sample, not a latency baseline. Route discovery and NAT
+conditions vary. The migration adds no transport gzip: Home/HTTP and
+Navidrome already have application-level compression choices, while SSH is
+encrypted and media payloads are generally incompressible.
 
 ## Earlier public-path proof
 
