@@ -65,6 +65,11 @@ npm run dogfood:subscriber -- \
 ssh -p 2222 <user>@127.0.0.1
 ```
 
+Subscriber route mode defaults to `auto`, which permits HyperDHT's LAN-local
+shortcut. Add `--route public` to disable only that shortcut when comparing a
+non-local DHT path. It does not force a relay, choose a fixed Internet route,
+or promise stable latency.
+
 The command prints the local Home URL. The local listeners remain stable while
 the subscriber reconnects in the background after a publisher restart. Active
 TCP stream recovery is deferred.

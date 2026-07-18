@@ -33,6 +33,7 @@ export interface DhtNode {
     publicKey: Buffer,
     options: {
       keyPair: DhtKeyPair;
+      localConnection: boolean;
       reusableSocket: true;
     },
   ) => DhtStream;

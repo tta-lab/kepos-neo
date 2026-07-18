@@ -23,6 +23,10 @@ import {
   type Observe,
 } from "./observability.js";
 import {
+  connectionOptionsForRoute,
+  type Route,
+} from "./route.js";
+import {
   createMuxSubscriber,
   type RunningMuxSubscriber,
 } from "./transport.js";
@@ -44,6 +48,8 @@ export interface StartMuxSubscriberOptions {
   log?: (line: string) => void;
   now?: () => number;
   observe?: Observe;
+  route?: Route;
+  sleep?: (delayMs: number) => Promise<void>;
 }
 
 export interface RunningMuxSubscriberDaemon {
@@ -79,15 +85,18 @@ export async function startMuxSubscriber(
   const keyPair = keyPairFromSecretKey(identity.secretKey);
   const dht = createDht({ bootstrap: options.bootstrap, keyPair });
   const now = options.now ?? Date.now;
+  const route = options.route ?? "auto";
   const connection = createPublisherConnection({
     connect: () =>
       dht.connect(Buffer.from(contact.publisherKey, "hex"), {
         keyPair,
-        reusableSocket: true,
+        ...connectionOptionsForRoute(route),
       }),
     log: options.log,
     now,
     observe: options.observe,
+    route,
+    sleep: options.sleep ?? delay,
   });
   const servers: Server[] = [];
   let stopped = false;
@@ -189,11 +198,13 @@ async function openAndBridge(
   }
 }
 
-function createPublisherConnection(options: {
+export function createPublisherConnection(options: {
   connect: () => DhtStream;
   log?: (line: string) => void;
   now: () => number;
   observe?: Observe;
+  route: Route;
+  sleep: (delayMs: number) => Promise<void>;
 }): ServiceOpener & {
   start: () => Promise<void>;
   stop: () => Promise<void>;
@@ -202,6 +213,7 @@ function createPublisherConnection(options: {
     | { mux: RunningMuxSubscriber; outer: DhtStream }
     | undefined;
   let reconnecting: Promise<RunningMuxSubscriber> | undefined;
+  let connectingOuter: DhtStream | undefined;
   let stopped = false;
   let connectionAttempt = 0;
 
@@ -248,9 +260,11 @@ function createPublisherConnection(options: {
       role: "subscriber",
       outerId,
       now: options.now,
+      route: options.route,
     });
     observe("outer.attempt", { attempt });
     const outer = options.connect();
+    connectingOuter = outer;
     const reportHandshake = observeHandshake(
       outer,
       observe,
@@ -284,7 +298,11 @@ function createPublisherConnection(options: {
         ),
       };
     } catch (error) {
-      const failure = error instanceof Error ? error : new Error(String(error));
+      const failure = stopped
+        ? new Error("Subscriber stopped")
+        : error instanceof Error
+          ? error
+          : new Error(String(error));
       observe("outer.closed", {
         trigger: "connect.error",
         error: failure.message,
@@ -294,6 +312,8 @@ function createPublisherConnection(options: {
       onFailure?.(observe);
       outer.destroy();
       throw failure;
+    } finally {
+      if (connectingOuter === outer) connectingOuter = undefined;
     }
   };
 
@@ -330,7 +350,7 @@ function createPublisherConnection(options: {
           options.log?.(
             `Publisher reconnect failed; retrying: ${message}`,
           );
-          await delay(delayMs);
+          await options.sleep(delayMs);
           delayMs = Math.min(delayMs * 2, 2_000);
         }
       }
@@ -365,6 +385,7 @@ function createPublisherConnection(options: {
     async stop(): Promise<void> {
       if (stopped) return;
       stopped = true;
+      connectingOuter?.destroy();
       current?.mux.close();
       current = undefined;
       await reconnecting?.catch(() => undefined);

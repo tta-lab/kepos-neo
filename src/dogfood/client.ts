@@ -1,6 +1,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { parseRoute } from "../mux/route.js";
 import {
   startMuxSubscriber,
   type MuxSubscriberService,
@@ -22,7 +23,7 @@ export interface RunningDogfoodClient
 
 export type DogfoodClientCliOptions = Pick<
   DogfoodClientOptions,
-  "stateDir" | "services" | "testBootstrapPort"
+  "route" | "stateDir" | "services" | "testBootstrapPort"
 >;
 
 function parseLocalService(value: string): MuxSubscriberService {
@@ -44,6 +45,7 @@ export function parseDogfoodClientCliOptions(
 ): DogfoodClientCliOptions {
   const options: DogfoodClientCliOptions = {
     stateDir: path.resolve("tmp", "dogfood", "client"),
+    route: "auto",
     services: [],
   };
   for (let index = 0; index < arguments_.length; index += 2) {
@@ -55,6 +57,10 @@ export function parseDogfoodClientCliOptions(
     }
     if (option === "--service") {
       options.services.push(parseLocalService(value));
+      continue;
+    }
+    if (option === "--route") {
+      options.route = parseRoute(value);
       continue;
     }
     if (option === "--test-bootstrap") {
@@ -83,6 +89,8 @@ export async function startDogfoodClient(
     log: options.log,
     now: options.now,
     observe: options.observe,
+    route: options.route,
+    sleep: options.sleep,
   });
   return {
     ...running,

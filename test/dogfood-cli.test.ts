@@ -22,12 +22,31 @@ test("subscriber CLI maps several local services onto one publisher connection",
       "navidrome:4533",
     ]),
     {
+      route: "auto",
       stateDir: path.resolve("./subscriber"),
       services: [
         { id: "ssh", localPort: 2222 },
         { id: "navidrome", localPort: 4533 },
       ],
     },
+  );
+});
+
+test("subscriber CLI accepts a public route diagnostic override", () => {
+  assert.deepEqual(
+    parseDogfoodClientCliOptions(["--route", "public"]),
+    {
+      route: "public",
+      stateDir: path.resolve("tmp", "dogfood", "client"),
+      services: [],
+    },
+  );
+});
+
+test("subscriber CLI rejects an unknown route", () => {
+  assert.throws(
+    () => parseDogfoodClientCliOptions(["--route", "relay"]),
+    /route must be auto or public/,
   );
 });
 

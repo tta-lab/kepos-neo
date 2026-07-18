@@ -180,6 +180,7 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     assert.ok(subscriberEvents.some(({ event }) => event === "outer.attempt"));
     assert.ok(subscriberEvents.some(({ event }) => event === "outer.handshake"));
     assert.ok(subscriberConnected?.outerId);
+    assert.equal(subscriberConnected.route, "auto");
     assert.equal(subscriberChannel?.outerId, subscriberConnected.outerId);
     assert.ok(
       publisherEvents.some(({ event }) => event === "outer.accepted"),
