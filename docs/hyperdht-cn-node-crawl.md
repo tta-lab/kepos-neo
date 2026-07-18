@@ -93,7 +93,10 @@ retesting NAT or process churn behind one public IP.
 For each selected endpoint, the validator creates two clean HyperDHT clients
 whose only initial bootstrap is that endpoint. It requires bootstrap, a
 successful `findNode` lookup, server announce, and an encrypted connection
-between the two clients. Results are appended to `validations.jsonl`.
+between the two clients. The connector sets `localConnection: false`, so a
+same-machine or LAN shortcut cannot satisfy the connection check. Results are
+appended to `validations.jsonl`; only records that explicitly prove the local
+shortcut was disabled count toward recommendations.
 
 An endpoint enters `bootstrap-recommendations.json` only after two successful
 validations spanning at least 12 hours. Recommendations are deduplicated by

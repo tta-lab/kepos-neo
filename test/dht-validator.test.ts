@@ -9,6 +9,7 @@ import { test } from "node:test";
 import {
   buildBootstrapCandidates,
   buildRecommendationPayload,
+  connectWithoutLocalShortcut,
   guardProbeSocketErrors,
   readBootstrapDiscoveries,
   selectValidationCandidates,
@@ -192,6 +193,40 @@ test("recommendation payloads are signed and verified with a pinned public key",
   );
 });
 
+test("recommendations reject validations that may have used the local shortcut", () => {
+  const candidates = buildBootstrapCandidates(
+    [
+      {
+        snapshot: "first",
+        timestamp: "2026-07-18T00:00:00.000Z",
+        endpoint: "47.94.213.63:49737",
+        host: "47.94.213.63",
+        port: 49_737,
+        minimumRttMs: 60,
+      },
+    ],
+    geos,
+  );
+  const legacyValidations = successfulValidations(
+    "47.94.213.63:49737",
+  ).map(({ localConnection: _localConnection, ...validation }) => validation);
+
+  const payload = buildRecommendationPayload(
+    candidates,
+    legacyValidations,
+    {
+      minimumSuccessfulValidations: 2,
+      minimumValidationSpanHours: 12,
+      maximumRecommendations: 5,
+      maximumPerAsn: 1,
+      maximumPerCountry: 2,
+    },
+    "2026-07-19T00:00:00.000Z",
+  );
+
+  assert.deepEqual(payload.endpoints, []);
+});
+
 test("candidate validation records isolated bootstrap probe evidence", async () => {
   const [candidate] = buildBootstrapCandidates(
     [
@@ -214,6 +249,7 @@ test("candidate validation records isolated bootstrap probe evidence", async () 
       lookupReplies: 12,
       announceConnect: true,
       connectMs: 700,
+      localConnection: false,
     }),
     "2026-07-19T00:00:00.000Z",
   );
@@ -226,6 +262,7 @@ test("candidate validation records isolated bootstrap probe evidence", async () 
     lookupReplies: 12,
     announceConnect: true,
     connectMs: 700,
+    localConnection: false,
   });
 });
 
@@ -316,6 +353,24 @@ test("validation batches skip recent hosts and spread work across ASN and countr
   );
 });
 
+test("isolated probes disable the HyperDHT local connection shortcut", () => {
+  let options: { localConnection: boolean } | undefined;
+  const socket = new EventEmitter();
+
+  const connected = connectWithoutLocalShortcut(
+    {
+      connect(_publicKey, receivedOptions) {
+        options = receivedOptions;
+        return socket;
+      },
+    },
+    Buffer.alloc(32),
+  );
+
+  assert.equal(connected, socket);
+  assert.deepEqual(options, { localConnection: false });
+});
+
 function successfulValidations(endpoint: string): BootstrapValidation[] {
   return [
     {
@@ -326,6 +381,7 @@ function successfulValidations(endpoint: string): BootstrapValidation[] {
       lookupReplies: 10,
       announceConnect: true,
       connectMs: 800,
+      localConnection: false,
     },
     {
       endpoint,
@@ -335,6 +391,7 @@ function successfulValidations(endpoint: string): BootstrapValidation[] {
       lookupReplies: 12,
       announceConnect: true,
       connectMs: 700,
+      localConnection: false,
     },
   ];
 }

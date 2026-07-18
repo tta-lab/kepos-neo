@@ -60,6 +60,7 @@ export interface BootstrapValidation {
   lookupReplies: number;
   announceConnect: boolean;
   connectMs: number | null;
+  localConnection?: boolean;
   error?: string;
 }
 
@@ -68,6 +69,7 @@ export interface BootstrapProbeResult {
   lookupReplies: number;
   announceConnect: boolean;
   connectMs: number;
+  localConnection: false;
 }
 
 export interface RecommendationCriteria {
@@ -132,7 +134,10 @@ interface ProbeDht extends EventEmitter {
   fullyBootstrapped(): Promise<void>;
   findNode(target: Buffer): AsyncIterable<unknown>;
   createServer(): ProbeServer;
-  connect(publicKey: Buffer): ProbeSocket;
+  connect(
+    publicKey: Buffer,
+    options: { localConnection: boolean },
+  ): ProbeSocket;
   destroy(options?: { force?: boolean }): Promise<void>;
 }
 
@@ -221,7 +226,11 @@ export function buildRecommendationPayload(
 ): RecommendationPayload {
   const validationsByEndpoint = new Map<string, BootstrapValidation[]>();
   for (const validation of validations) {
-    if (!validation.success || !validation.announceConnect) {
+    if (
+      !validation.success ||
+      !validation.announceConnect ||
+      validation.localConnection !== false
+    ) {
       continue;
     }
     const current = validationsByEndpoint.get(validation.endpoint) ?? [];
@@ -373,6 +382,7 @@ export async function validateBootstrapCandidate(
       lookupReplies: 0,
       announceConnect: false,
       connectMs: null,
+      localConnection: false,
       error: error instanceof Error ? error.message : String(error),
     };
   }
@@ -465,7 +475,7 @@ export async function runIsolatedBootstrapProbe(
     await withTimeout(server.listen(keyPair), timeoutMs, "announce");
     const connectStartedAt = Date.now();
     const accepted = once(server, "connection");
-    socket = subscriber.connect(keyPair.publicKey);
+    socket = connectWithoutLocalShortcut(subscriber, keyPair.publicKey);
     guardProbeSocketErrors(socket);
     await withTimeout(
       Promise.all([once(socket, "open"), accepted]),
@@ -477,6 +487,7 @@ export async function runIsolatedBootstrapProbe(
       lookupReplies,
       announceConnect: true,
       connectMs: Date.now() - connectStartedAt,
+      localConnection: false,
     };
   } finally {
     socket?.destroy();
@@ -492,6 +503,18 @@ export function guardProbeSocketErrors(
   socket: Pick<EventEmitter, "on">,
 ): void {
   socket.on("error", () => undefined);
+}
+
+export function connectWithoutLocalShortcut<T>(
+  dht: {
+    connect(
+      publicKey: Buffer,
+      options: { localConnection: boolean },
+    ): T;
+  },
+  publicKey: Buffer,
+): T {
+  return dht.connect(publicKey, { localConnection: false });
 }
 
 export function signRecommendationPayload(
