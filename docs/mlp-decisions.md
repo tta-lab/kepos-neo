@@ -135,9 +135,52 @@ resolves only through publisher-local configuration.
   user installation.
 - The multiplex daemon is run manually during the first spike. launchd,
   Windows Service integration, scheduled tasks, login startup, and desktop
-  lifecycle UI are deployment work, not transport requirements.
-- Desktop framework and Android packaging are deferred until the network and
-  service model pass P0.
+  packaging are deployment work, not transport requirements.
+- Desktop framework selection and Android packaging are deferred until the
+  network and service model pass P0.
+
+### Desktop application shape
+
+The desktop product follows the familiar remote-desktop application shape:
+one visible control window backed by a resident tray or menu-bar process. The
+desktop application process owns the publisher and subscriber runtimes
+directly; the first version does not split the UI from a separately supervised
+child daemon.
+
+Lifecycle semantics are explicit:
+
+- opening Kepos starts its configured network roles;
+- closing the main window hides it while the tray process and publisher remain
+  online;
+- choosing **Quit Kepos** stops the publisher, subscriber connections, and
+  local listeners;
+- locking the desktop does not intentionally stop Kepos, but logout, reboot,
+  sleep, process failure, or explicit quit may make it unavailable;
+- the first version does not promise pre-login or reboot-persistent unattended
+  access.
+
+This avoids launchd, Windows Service, scheduled-task, privilege, child-process
+versioning, and orphan-process work during the desktop-first product spike.
+The same TypeScript network core may later run as a headless daemon on NAS,
+WSL, and Linux servers. A system service remains an optional deployment mode
+for measured unattended-access demand, not the default desktop architecture.
+
+The desktop navigation borrows the device-detail shell of remote-desktop
+applications without treating the whole machine as the shared resource:
+
+- the sidebar lists local devices and publishers shared with the user;
+- the application opens the last-used remote publisher by default;
+- the selected publisher page leads with online state, path quality, and an
+  **Open Home** action;
+- Navidrome, SSH, and other published services appear as quick-launch actions;
+- **Add service** appears only on a local publisher page, while **Add
+  publisher** starts pairing from a remote-device context;
+- the list may reserve space for several publishers, but the first subscriber
+  runtime still connects to only one configured publisher.
+
+The tray surface stays small: current online state, number of shared services
+and connected subscribers, open Kepos, pause sharing, and quit. It is a
+lifecycle and status surface, not a second configuration UI.
 
 ### MLP identity boundary
 
@@ -194,7 +237,8 @@ replacement publisher key, but that recovery layer is explicitly deferred.
 - one subscriber maintaining connections to multiple publishers;
 - per-service allowlists, roles, or grants;
 - one key or DHT announcement per service;
-- launchd, Windows Service, scheduled-task, login-startup, or desktop UI work;
+- launchd, Windows Service, scheduled-task, login-startup, desktop packaging,
+  or unattended access before login;
 - mobile background lifecycle and battery policy;
 - relay operation or TCP/WSS fallback;
 - multiple outer connections per subscriber for traffic classes;
