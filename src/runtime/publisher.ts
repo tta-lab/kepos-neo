@@ -1,6 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 
-import { startMuxHomeServer, type RunningHomeServer } from "../home/server.js";
+import { startHomeServer, type RunningHomeServer } from "../home/server.js";
 import {
   createDht,
   dhtStreamSnapshot,
@@ -51,7 +51,7 @@ export async function startPublisher(
   const { config, manifest } = await loadPublisherState(options.stateDir);
   const keyPair = keyPairFromSeed(config.seed);
   const publisherKey = keyPair.publicKey.toString("hex");
-  const home = await startMuxHomeServer({
+  const home = await startHomeServer({
     publisherKey,
     displayName: manifest.displayName,
     services: manifest.services.map(({ id, name, kind }) => ({

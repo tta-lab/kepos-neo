@@ -2,16 +2,11 @@ import { readFile } from "node:fs/promises";
 import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
-import { parsePublisherConfig } from "../config.js";
-import { derivePublisherHomeKey } from "../keys.js";
 import {
   createHomeRegistry,
-  createMuxHomeRegistry,
-  type CreateHomeRegistryOptions,
   type HomeRegistryService,
-  type MuxHomeRegistryService,
 } from "./registry.js";
 
 const host = "127.0.0.1" as const;
@@ -29,37 +24,10 @@ export interface RunningHomeServer {
 }
 
 export interface StartHomeServerOptions {
-  homeKey: string;
-  port?: number;
-  displayName?: string;
-  services?: HomeRegistryService[];
-}
-
-export interface StartMuxHomeServerOptions {
   publisherKey: string;
   port?: number;
   displayName?: string;
-  services?: MuxHomeRegistryService[];
-}
-
-export interface HomeCliOptions {
-  publisherPath: string;
-  port: number;
-}
-
-export function parseHomeCliOptions(arguments_: readonly string[]): HomeCliOptions {
-  const publisherPath = path.resolve(arguments_[0] ?? path.join("tmp", "p0", "publisher.json"));
-  if (arguments_.length <= 1) return { publisherPath, port: 0 };
-  if (arguments_[1] !== "--port" || arguments_.length !== 3) {
-    throw new Error("Home CLI accepts only --port after the publisher path");
-  }
-
-  const port = Number(arguments_[2]);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new Error("port must be an integer from 0 through 65535");
-  }
-
-  return { publisherPath, port };
+  services?: HomeRegistryService[];
 }
 
 function send(
@@ -96,23 +64,12 @@ async function sendBenchmark(response: ServerResponse, bytes: number): Promise<v
 }
 
 export async function startHomeServer({
-  homeKey,
-  port = 0,
-  displayName = "Local Publisher",
-  services = [],
-}: StartHomeServerOptions): Promise<RunningHomeServer> {
-  const registryOptions: CreateHomeRegistryOptions = { displayName, services };
-  const registry = createHomeRegistry(homeKey, registryOptions);
-  return startHomeServerWithRegistry(registry, port);
-}
-
-export async function startMuxHomeServer({
   publisherKey,
   port = 0,
   displayName = "Local Publisher",
   services = [],
-}: StartMuxHomeServerOptions): Promise<RunningHomeServer> {
-  const registry = createMuxHomeRegistry({
+}: StartHomeServerOptions): Promise<RunningHomeServer> {
+  const registry = createHomeRegistry({
     publisherKey,
     displayName,
     services,
@@ -212,19 +169,4 @@ async function startHomeServerWithRegistry(
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   };
-}
-
-async function runHomeCli(): Promise<void> {
-  const { publisherPath, port } = parseHomeCliOptions(process.argv.slice(2));
-  const publisher = parsePublisherConfig(JSON.parse(await readFile(publisherPath, "utf8")) as unknown);
-  const home = await startHomeServer({ homeKey: derivePublisherHomeKey(publisher.seed), port });
-  console.log(`Home ready @${home.url}`);
-}
-
-const invokedPath = process.argv[1];
-if (invokedPath && import.meta.url === pathToFileURL(path.resolve(invokedPath)).href) {
-  runHomeCli().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
 }

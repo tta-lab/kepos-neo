@@ -11,9 +11,10 @@ documents are:
 - [Game multiplayer scenarios](./game-multiplayer-scenarios.md)
 - [Network transport and compatibility](./network-transport-and-compatibility.md)
 
-`P0` names the first single-desktop technical slice inside MLP V0. It verifies
-the Hypertele baseline and Home integration, but does not by itself pass the
-full MLP V0 product-value gate or enter MLP V1.
+`P0` names the completed, historical single-desktop technical slice inside MLP
+V0. It verified the Hypertele baseline and Home integration. Its executable
+runtime has since been replaced by the persistent Kepos mux runtime; only its
+evidence remains.
 
 ## Product boundary
 
@@ -105,9 +106,9 @@ Each publisher owns one allowlist. Every service explicitly published by that
 publisher uses the same trusted peer-key set.
 
 P0 allowed one Hypertele process and one service key per published service.
-Public-path dogfood then measured multi-second cold connection setup and showed
+Later public-path tests measured multi-second cold connection setup and showed
 that a route is reusable for only a short window after each connection closes.
-The next transport shape is therefore:
+The canonical transport shape is therefore:
 
 - one publisher daemon instead of one Hypertele child per service;
 - one subscriber daemon instead of one Hypertele child per local endpoint;
@@ -131,13 +132,14 @@ resolves only through publisher-local configuration.
 - Node.js is the runtime.
 - New source is TypeScript.
 - npm manages dependencies and scripts.
-- P0 invokes the pinned Hypertele CLI from Node rather than requiring a global
-  user installation.
-- The multiplex daemon is run manually during the first spike. launchd,
+- Kepos imports HyperDHT and Protomux directly; it does not spawn or depend on
+  Hypertele.
+- The canonical CLI runs the shared publisher/subscriber runtime in the
+  foreground. launchd,
   Windows Service integration, scheduled tasks, login startup, and desktop
   packaging are deployment work, not transport requirements.
 - Desktop framework selection and Android packaging are deferred until the
-  network and service model pass P0.
+  shared transport and service model are stable.
 
 ### Desktop application shape
 
@@ -225,9 +227,10 @@ such as Alice to `publisherKey`. After authentication, Registry entries name
 services by `serviceId`; they do not contain service keys. Opening a service is
 an authenticated multiplex operation on the existing publisher connection.
 
-The dogfood daemon now uses `publisherKey` and one persistent multiplex
+The canonical runtime uses `publisherKey` and one persistent multiplex
 connection. The older P0 `homeKey`, per-service keys, and Hypertele child
-processes remain only as P0 test fixtures; they are not part of this protocol.
+processes remain only in historical evidence; they are not executable paths or
+part of this protocol.
 
 Rotating `publisherKey` requires re-pairing. A later Person root could sign a
 replacement publisher key, but that recovery layer is explicitly deferred.
@@ -291,7 +294,7 @@ V1 validates:
 - at least two member people concurrently using one named TCP service;
 - local authorization without an online controller decision;
 - one publisher allowlist shared by every published service;
-- multiple services, with separate Hypertele processes accepted initially;
+- multiple services sharing one persistent Protomux connection;
 - one local HTTP gateway routing the default Blog and later HTTP services by
   `*.kepos.localhost`;
 - compatibility fallback to `127.0.0.1:<port>`;
@@ -439,30 +442,23 @@ signal nor require users to configure it.
 
 ## Current implementation order
 
-1. Run MLP V0 Hello World on the available single desktop: one publisher
-   process, one trusted client identity, and a tiny local static Blog.
-2. Add a second local client identity/process and verify both can open the same
-   Blog. This proves configuration and one-to-many semantics, not independent
-   devices or NAT traversal.
-3. Add a publisher service registry and the local HTTP gateway, initially
-   allowing one Hypertele process per service.
-4. Build the separate Android client-only spike after the desktop path works.
-5. Run the first real cross-device/cross-network smoke with the desktop on
-   broadband and Android on cellular data, first against Blog and then Navic +
-   Navidrome.
-6. Measure locked-screen streaming, network switching, repeated connection
-   setup, memory, and backpressure.
-7. Decide whether measured process or connection cost justifies multiplex.
-8. Run the broader mainland and overseas direct-path matrix when more devices
-   or testers are available.
-9. Build MLP V2 blind UDX relay with limits and diagnostics.
-10. Run hard-NAT, sustained-throughput, and relay-failure tests.
-11. Use measured results to decide whether a TCP/443 relay is needed.
+1. Finish migrating useful route, retry, and observation behavior into the
+   shared Kepos runtime.
+2. Remove the executable P0 path and Hypertele dependency.
+3. Keep the foreground CLI as the headless host and build the desktop host over
+   the same lifecycle APIs and state.
+4. Use field evidence to decide whether application health, diagnostics
+   storage, native packaging hardening, or multi-publisher support is needed.
+5. Run a broader direct-path matrix when stable hosts and testers are
+   available.
+6. Build an MLP V2 blind UDX relay only after measured direct-path failures
+   justify it.
+7. Use measured relay results to decide whether a TCP/443 relay is needed.
 
-The single-desktop smoke must not claim evidence for public-DHT reachability,
-NAT punching, CGNAT, cross-carrier quality, mobile lifecycle, or relay need.
+Historical P0 evidence must not claim public-DHT reachability, NAT punching,
+CGNAT, cross-carrier quality, mobile lifecycle, or relay need beyond what was
+actually tested.
 
-MLP V0 uses the npm package under its declared MIT metadata and does not wait
-for an upstream LICENSE-file change. If source is later copied or forked, the
-fork must retain upstream provenance and record that the source package
-declared MIT while omitting the full LICENSE text.
+Copied or adapted Hypertele behavior retains upstream provenance and records
+that the source package declared MIT even though its repository omitted a
+standalone LICENSE file.

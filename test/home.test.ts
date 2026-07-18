@@ -1,54 +1,31 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { test } from "node:test";
 
 import { createHomeRegistry } from "../src/home/registry.js";
-import * as homeServerModule from "../src/home/server.js";
+import { startHomeServer } from "../src/home/server.js";
 
-const { startHomeServer } = homeServerModule;
+const publisherKey = "ab".repeat(32);
 
-const homeKey = "ab".repeat(32);
-const sshKey = "cd".repeat(32);
-
-test("Home CLI accepts a fixed loopback port", () => {
-  const parseHomeCliOptions = (
-    homeServerModule as typeof homeServerModule & {
-      parseHomeCliOptions?: (arguments_: readonly string[]) => {
-        publisherPath: string;
-        port: number;
-      };
-    }
-  ).parseHomeCliOptions;
-  assert.equal(typeof parseHomeCliOptions, "function");
-  assert.deepEqual(parseHomeCliOptions?.(["publisher.json", "--port", "18080"]), {
-    publisherPath: path.resolve("publisher.json"),
-    port: 18080,
+test("Home Registry binds services to one publisher key", () => {
+  const registry = createHomeRegistry({
+    publisherKey,
+    displayName: "Local Publisher",
+    services: [],
   });
-});
-
-test("Home CLI rejects an invalid fixed port", () => {
-  assert.throws(
-    () => homeServerModule.parseHomeCliOptions(["publisher.json", "--port", "not-a-port"]),
-    /port/i,
-  );
-});
-
-test("Home Registry has the P0 schema and binds its service to the Home key", () => {
-  const registry = createHomeRegistry(homeKey);
 
   assert.deepEqual(registry, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision: 1,
     publisher: {
       displayName: "Local Publisher",
+      publisherKey,
     },
     services: [
       {
         id: "home",
         name: "Home",
         kind: "http",
-        serviceKey: homeKey,
       },
     ],
   });
@@ -59,23 +36,32 @@ test("Home Registry has the P0 schema and binds its service to the Home key", ()
   }
 });
 
-test("Home Registry rejects a malformed Home key", () => {
-  assert.throws(() => createHomeRegistry("not-a-home-key"), /home key/i);
+test("Home Registry rejects a malformed publisher key", () => {
+  assert.throws(
+    () =>
+      createHomeRegistry({
+        publisherKey: "not-a-publisher-key",
+        displayName: "Local Publisher",
+        services: [],
+      }),
+    /publisher key/i,
+  );
 });
 
 test("Home Registry lists configured TCP services without publisher-local targets", () => {
-  const registry = createHomeRegistry(homeKey, {
+  const registry = createHomeRegistry({
+    publisherKey,
     displayName: "kosmos",
-    services: [{ id: "ssh", name: "SSH", kind: "tcp", serviceKey: sshKey }],
+    services: [{ id: "ssh", name: "SSH", kind: "tcp" }],
   });
 
   assert.deepEqual(registry, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision: 1,
-    publisher: { displayName: "kosmos" },
+    publisher: { displayName: "kosmos", publisherKey },
     services: [
-      { id: "home", name: "Home", kind: "http", serviceKey: homeKey },
-      { id: "ssh", name: "SSH", kind: "tcp", serviceKey: sshKey },
+      { id: "home", name: "Home", kind: "http" },
+      { id: "ssh", name: "SSH", kind: "tcp" },
     ],
   });
   const serialized = JSON.stringify(registry);
@@ -85,43 +71,45 @@ test("Home Registry lists configured TCP services without publisher-local target
 });
 
 test("Home Registry rejects duplicate, reserved, or malformed public services", () => {
-  const ssh = { id: "ssh", name: "SSH", kind: "tcp" as const, serviceKey: sshKey };
+  const ssh = { id: "ssh", name: "SSH", kind: "tcp" as const };
+  const options = { publisherKey, displayName: "kosmos" };
 
   assert.throws(
-    () => createHomeRegistry(homeKey, { displayName: "kosmos", services: [ssh, ssh] }),
+    () => createHomeRegistry({ ...options, services: [ssh, ssh] }),
     /duplicate|service/i,
   );
   assert.throws(
     () =>
-      createHomeRegistry(homeKey, {
-        displayName: "kosmos",
+      createHomeRegistry({
+        ...options,
         services: [{ ...ssh, id: "home" }],
       }),
     /reserved|service/i,
   );
   assert.throws(
     () =>
-      createHomeRegistry(homeKey, {
-        displayName: "kosmos",
-        services: [{ ...ssh, serviceKey: "bad" }],
+      createHomeRegistry({
+        ...options,
+        services: [{ ...ssh, id: "../ssh" }],
       }),
-    /serviceKey|key/i,
+    /service|id/i,
   );
 });
 
 test("Home server exposes the configured Registry", async () => {
   const home = await startHomeServer({
-    homeKey,
+    publisherKey,
     displayName: "kosmos",
-    services: [{ id: "ssh", name: "SSH", kind: "tcp", serviceKey: sshKey }],
+    services: [{ id: "ssh", name: "SSH", kind: "tcp" }],
   });
   try {
     const response = await fetch(`${home.url}/.well-known/kepos/services.json`);
     assert.deepEqual(
       await response.json(),
-      createHomeRegistry(homeKey, {
+      createHomeRegistry({
+        publisherKey,
         displayName: "kosmos",
-        services: [{ id: "ssh", name: "SSH", kind: "tcp", serviceKey: sshKey }],
+        services: [{ id: "ssh", name: "SSH", kind: "tcp" }],
       }),
     );
   } finally {
@@ -130,7 +118,7 @@ test("Home server exposes the configured Registry", async () => {
 });
 
 async function withHome(run: (home: Awaited<ReturnType<typeof startHomeServer>>) => Promise<void>): Promise<void> {
-  const home = await startHomeServer({ homeKey });
+  const home = await startHomeServer({ publisherKey });
   try {
     await run(home);
   } finally {
@@ -178,7 +166,14 @@ test("Home server serves the Registry with its revision ETag", async () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
     assert.equal(response.headers.get("etag"), '"1"');
-    assert.deepEqual(await response.json(), createHomeRegistry(homeKey));
+    assert.deepEqual(
+      await response.json(),
+      createHomeRegistry({
+        publisherKey,
+        displayName: "Local Publisher",
+        services: [],
+      }),
+    );
   });
 });
 

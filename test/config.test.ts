@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  parseClientContact,
   parseSubscriberContact,
   parsePublisherManifest,
   parsePublisherConfig,
-  serializeClientContact,
   serializeSubscriberContact,
   serializePublisherManifest,
   serializePublisherConfig,
@@ -20,7 +18,7 @@ test("publisher config accepts an empty allowlist as deny-all", () => {
   assert.deepEqual(parsePublisherConfig({ seed, allow: [] }), { seed, allow: [] });
 });
 
-test("publisher config round-trips Hypertele native seed and allow fields", () => {
+test("publisher config round-trips seed and allow fields", () => {
   const config = { seed, allow: [publicKey, otherPublicKey] };
 
   assert.deepEqual(parsePublisherConfig(JSON.parse(serializePublisherConfig(config))), config);
@@ -31,7 +29,7 @@ for (const [name, value] of [
   ["null", { seed, allow: null }],
   ["non-array", { seed, allow: publicKey }],
 ] as const) {
-  test(`publisher config rejects ${name} allow instead of passing fail-open state to Hypertele`, () => {
+  test(`publisher config rejects ${name} allow instead of accepting fail-open state`, () => {
     assert.throws(() => parsePublisherConfig(value), /allow/i);
   });
 }
@@ -61,42 +59,6 @@ test("publisher config rejects fields outside the native seed and allow shape", 
   assert.throws(
     () => parsePublisherConfig({ seed, allow: [publicKey], secretKey: "ff".repeat(64) }),
     /field|property|shape/i,
-  );
-});
-
-test("client contact round-trips a pinned Home key, local label, and ephemeral port request", () => {
-  const contact = {
-    homeKey: publicKey,
-    label: "Local Publisher",
-    requestedLocalPort: 0,
-  };
-
-  assert.deepEqual(parseClientContact(JSON.parse(serializeClientContact(contact))), contact);
-});
-
-test("client contact rejects an invalid Home key", () => {
-  assert.throws(
-    () =>
-      parseClientContact({
-        homeKey: "ff",
-        label: "Local Publisher",
-        requestedLocalPort: 0,
-      }),
-    /homeKey/i,
-  );
-});
-
-test("client contact rejects a blank label", () => {
-  assert.throws(
-    () => parseClientContact({ homeKey: publicKey, label: "  ", requestedLocalPort: 0 }),
-    /label/i,
-  );
-});
-
-test("client contact rejects an invalid requested local port", () => {
-  assert.throws(
-    () => parseClientContact({ homeKey: publicKey, label: "Publisher", requestedLocalPort: -1 }),
-    /requestedLocalPort/i,
   );
 });
 

@@ -1,19 +1,16 @@
-# Kepos Neo P0
+# Kepos Neo
 
-This slice checks one small path: an allowlisted Hypertele client can open a
-publisher's local Home page, while an unknown client cannot.
-
-P0 runs one publisher and two client identities on one desktop. It does not
-prove cross-device access, NAT traversal, relay support, mobile support, or the
-full Kepos product idea.
+Kepos Neo exposes a publisher's local Home page and configured TCP services to
+allowlisted subscribers. One persistent encrypted HyperDHT connection carries
+independent Protomux channels for Home, SSH, Navidrome, and other services.
 
 ## Requirements
 
 - Node.js 22
 - npm 10
 
-Install dependencies with `npm ci`. Generate local P0 state with
-`npm run p0:setup`.
+Install dependencies with `npm ci`. Use the canonical `kepos` CLI below to
+create publisher and subscriber state.
 
 Generated keys and configs live under `tmp/`. They are secrets: do not commit,
 copy into logs, or share them.
@@ -100,8 +97,9 @@ npm run kepos -- publisher set-services \
   --service navidrome:Navidrome:4533
 ```
 
-Publisher seeds and subscriber secret keys never cross devices. See
-`docs/evidence/mac-kosmos-ssh-dogfood.md` for the tested Mac-to-kosmos path.
+Publisher seeds and subscriber secret keys never cross devices. The historical
+evidence in `docs/evidence/mac-kosmos-ssh-dogfood.md` records the tested
+Mac-to-kosmos path and the commands used at the time.
 
 Home also exposes a bounded download endpoint for transport checks:
 

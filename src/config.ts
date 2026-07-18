@@ -3,12 +3,6 @@ export interface PublisherConfig {
   allow: string[];
 }
 
-export interface ClientContact {
-  homeKey: string;
-  label: string;
-  requestedLocalPort: number;
-}
-
 export interface SubscriberContact {
   publisherKey: string;
   label: string;
@@ -93,35 +87,6 @@ export function parsePublisherConfig(value: unknown): PublisherConfig {
 
 export function serializePublisherConfig(config: PublisherConfig): string {
   return `${JSON.stringify(parsePublisherConfig(config), null, 2)}\n`;
-}
-
-export function parseClientContact(value: unknown): ClientContact {
-  if (!isRecord(value)) {
-    throw new Error("client contact must be an object");
-  }
-
-  const homeKey = parseKeyHex(value.homeKey, "homeKey");
-  if (typeof value.label !== "string" || value.label.trim().length === 0) {
-    throw new Error("label must be a non-empty string");
-  }
-  if (
-    typeof value.requestedLocalPort !== "number" ||
-    !Number.isInteger(value.requestedLocalPort) ||
-    value.requestedLocalPort < 0 ||
-    value.requestedLocalPort > 65_535
-  ) {
-    throw new Error("requestedLocalPort must be an integer from 0 through 65535");
-  }
-
-  return {
-    homeKey,
-    label: value.label,
-    requestedLocalPort: value.requestedLocalPort,
-  };
-}
-
-export function serializeClientContact(contact: ClientContact): string {
-  return `${JSON.stringify(parseClientContact(contact), null, 2)}\n`;
 }
 
 export function parseSubscriberContact(value: unknown): SubscriberContact {

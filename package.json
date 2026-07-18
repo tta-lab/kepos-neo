@@ -11,22 +11,11 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test",
     "build:home": "tailwindcss -i home/styles.input.css -o home/styles.css --minify",
-    "kepos": "tsx src/cli/main.ts",
-    "p0:setup": "tsx src/p0/setup.ts",
-    "p0:home": "tsx src/home/server.ts",
-    "p0:publisher": "tsx src/p0/publisher.ts",
-    "p0:client": "tsx src/p0/client.ts",
-    "dogfood:setup-subscriber": "tsx src/dogfood/setup-client.ts",
-    "dogfood:setup-publisher": "tsx src/dogfood/setup-publisher.ts",
-    "dogfood:add-publisher": "tsx src/dogfood/contact.ts",
-    "dogfood:set-allow": "tsx src/dogfood/allow.ts",
-    "dogfood:publisher": "tsx src/dogfood/publisher.ts",
-    "dogfood:subscriber": "tsx src/dogfood/client.ts"
+    "kepos": "tsx src/cli/main.ts"
   },
   "dependencies": {
     "compact-encoding": "^3.3.0",
     "hyperdht": "^6.33.0",
-    "hypertele": "1.1.4",
     "protomux": "^3.11.0"
   },
   "devDependencies": {
