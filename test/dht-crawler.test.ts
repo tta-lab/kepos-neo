@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
   aggregateGraphReplies,
   isCnIpv4,
   parseCnIpv4Ranges,
+  readCrawlerHistory,
+  recordGraphNovelty,
   rankFrontier,
+  selectTargetPrefixes,
+  shouldContinueFrontier,
   summarizeObservations,
   type GraphReply,
   type NodeObservation,
@@ -154,4 +161,129 @@ test("frontier prefers unverified nodes advertised by independent responders", (
     rankFrontier(graph.nodes, 2).map(({ endpoint }) => endpoint),
     ["2.2.2.2:2002", "3.3.3.3:3003"],
   );
+});
+
+test("target prefixes prefer buckets unused by earlier snapshots", () => {
+  const shuffledPrefixes = [
+    2, 1, 0, 5, 4, 3, ...Array.from({ length: 250 }, (_, index) => index + 6),
+  ];
+
+  assert.deepEqual(
+    selectTargetPrefixes(4, [0, 1, 2], shuffledPrefixes),
+    [5, 4, 3, 6],
+  );
+});
+
+test("frontier reserves most queries for endpoints unseen in earlier snapshots", () => {
+  const graph = aggregateGraphReplies([
+    {
+      from: { host: "1.1.1.1", port: 1001 },
+      rtt: 40,
+      closerNodes: [
+        { host: "2.2.2.2", port: 2002 },
+        { host: "3.3.3.3", port: 3003 },
+        { host: "5.5.5.5", port: 5005 },
+      ],
+    },
+    {
+      from: { host: "4.4.4.4", port: 4004 },
+      rtt: 80,
+      closerNodes: [{ host: "2.2.2.2", port: 2002 }],
+    },
+  ]);
+
+  assert.deepEqual(
+    rankFrontier(
+      graph.nodes,
+      3,
+      new Set(["2.2.2.2:2002"]),
+    ).map(({ endpoint }) => endpoint),
+    ["3.3.3.3:3003", "5.5.5.5:5005", "2.2.2.2:2002"],
+  );
+});
+
+test("graph novelty counts only endpoints and edges absent from earlier snapshots", () => {
+  const seenNodes = new Set(["1.1.1.1:1001"]);
+  const seenEdges = new Set(["1.1.1.1:1001>2.2.2.2:2002"]);
+
+  const novelty = recordGraphNovelty(
+    {
+      from: { host: "1.1.1.1", port: 1001 },
+      rtt: 40,
+      closerNodes: [
+        { host: "2.2.2.2", port: 2002 },
+        { host: "3.3.3.3", port: 3003 },
+      ],
+    },
+    seenNodes,
+    seenEdges,
+  );
+
+  assert.deepEqual(novelty, { newNodes: 2, newEdges: 1 });
+  assert.deepEqual(
+    [...seenNodes].sort(),
+    ["1.1.1.1:1001", "2.2.2.2:2002", "3.3.3.3:3003"],
+  );
+});
+
+test("another frontier round requires useful new-node or new-edge yield", () => {
+  assert.equal(
+    shouldContinueFrontier(
+      { queries: 4, newNodes: 0, newEdges: 24 },
+      { minimumNewNodesPerQuery: 1, minimumNewEdgesPerQuery: 5 },
+    ),
+    true,
+  );
+  assert.equal(
+    shouldContinueFrontier(
+      { queries: 4, newNodes: 1, newEdges: 4 },
+      { minimumNewNodesPerQuery: 1, minimumNewEdgesPerQuery: 5 },
+    ),
+    false,
+  );
+});
+
+test("crawler history merges target prefixes, endpoints, and edges across snapshots", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-dht-history-"));
+  try {
+    const first = path.join(root, "snapshots", "first");
+    const second = path.join(root, "snapshots", "second");
+    await mkdir(first, { recursive: true });
+    await mkdir(second, { recursive: true });
+    await writeFile(
+      path.join(first, "run.json"),
+      JSON.stringify({ targetPrefixes: [1, 2] }),
+    );
+    await writeFile(
+      path.join(second, "run.json"),
+      JSON.stringify({ targetPrefixes: [3] }),
+    );
+    await writeFile(
+      path.join(first, "nodes.jsonl"),
+      `${JSON.stringify({ endpoint: "1.1.1.1:1001" })}\n`,
+    );
+    await writeFile(
+      path.join(second, "nodes.jsonl"),
+      `${JSON.stringify({ endpoint: "2.2.2.2:2002" })}\n`,
+    );
+    await writeFile(
+      path.join(first, "edges.jsonl"),
+      `${JSON.stringify({ source: "1.1.1.1:1001", target: "2.2.2.2:2002" })}\n`,
+    );
+    await writeFile(path.join(second, "edges.jsonl"), "");
+
+    const history = await readCrawlerHistory(root);
+
+    assert.deepEqual(history.targetPrefixes, [1, 2, 3]);
+    assert.deepEqual(
+      [...history.endpoints].sort(),
+      ["1.1.1.1:1001", "2.2.2.2:2002"],
+    );
+    assert.deepEqual(
+      [...history.edges],
+      ["1.1.1.1:1001>2.2.2.2:2002"],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

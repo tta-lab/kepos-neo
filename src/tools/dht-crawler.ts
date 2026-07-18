@@ -1,10 +1,16 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import { isIPv4 } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 
 const require = createRequire(import.meta.url);
 const HyperDHT = require("hyperdht") as HyperDhtConstructor;
@@ -63,6 +69,26 @@ export interface GraphSnapshot {
   edges: GraphEdge[];
 }
 
+export interface QueryNovelty {
+  newNodes: number;
+  newEdges: number;
+}
+
+export interface FrontierYield extends QueryNovelty {
+  queries: number;
+}
+
+export interface FrontierThresholds {
+  minimumNewNodesPerQuery: number;
+  minimumNewEdgesPerQuery: number;
+}
+
+export interface CrawlerHistory {
+  targetPrefixes: number[];
+  endpoints: Set<string>;
+  edges: Set<string>;
+}
+
 interface HyperDhtNode {
   fullyBootstrapped(): Promise<void>;
   findNode(
@@ -79,6 +105,8 @@ interface HyperDhtConstructor {
 interface CrawlerOptions {
   targets: number;
   frontier: number;
+  frontierRounds: number;
+  frontierThresholds: FrontierThresholds;
   outputRoot: string;
 }
 
@@ -223,15 +251,147 @@ export function aggregateGraphReplies(replies: GraphReply[]): GraphSnapshot {
 export function rankFrontier(
   nodes: GraphNode[],
   limit: number,
+  previouslySeen = new Set<string>(),
 ): GraphNode[] {
-  return nodes
-    .filter(({ verified }) => !verified)
+  const candidates = nodes.filter(({ verified }) => !verified);
+  const compare = (left: GraphNode, right: GraphNode): number =>
+    right.advertisedBy - left.advertisedBy ||
+    left.endpoint.localeCompare(right.endpoint);
+  const novel = candidates
+    .filter(({ endpoint }) => !previouslySeen.has(endpoint))
+    .sort(compare);
+  const reliable = candidates.sort(compare);
+  const selected = novel.slice(0, Math.ceil(limit * 0.7));
+  const selectedEndpoints = new Set(selected.map(({ endpoint }) => endpoint));
+  for (const candidate of reliable) {
+    if (selected.length >= limit) {
+      break;
+    }
+    if (selectedEndpoints.has(candidate.endpoint)) {
+      continue;
+    }
+    selected.push(candidate);
+    selectedEndpoints.add(candidate.endpoint);
+  }
+  return selected;
+}
+
+export function selectTargetPrefixes(
+  count: number,
+  previousPrefixes: number[],
+  shuffledPrefixes: number[],
+): number[] {
+  const uses = new Array<number>(256).fill(0);
+  for (const prefix of previousPrefixes) {
+    if (Number.isInteger(prefix) && prefix >= 0 && prefix <= 255) {
+      uses[prefix] += 1;
+    }
+  }
+  const order = new Map(
+    shuffledPrefixes.map((prefix, index) => [prefix, index]),
+  );
+  return Array.from({ length: 256 }, (_, prefix) => prefix)
     .sort(
       (left, right) =>
-        right.advertisedBy - left.advertisedBy ||
-        left.endpoint.localeCompare(right.endpoint),
+        uses[left] - uses[right] ||
+        (order.get(left) ?? left) - (order.get(right) ?? right),
     )
-    .slice(0, limit);
+    .slice(0, Math.min(count, 256));
+}
+
+export function recordGraphNovelty(
+  reply: GraphReply,
+  seenNodes: Set<string>,
+  seenEdges: Set<string>,
+): QueryNovelty {
+  let newNodes = addNovelNode(reply.from, seenNodes);
+  let newEdges = 0;
+  const source = endpoint(reply.from);
+  for (const neighbor of reply.closerNodes ?? []) {
+    newNodes += addNovelNode(neighbor, seenNodes);
+    const edge = `${source}>${endpoint(neighbor)}`;
+    if (!seenEdges.has(edge)) {
+      seenEdges.add(edge);
+      newEdges += 1;
+    }
+  }
+  return { newNodes, newEdges };
+}
+
+export function shouldContinueFrontier(
+  frontierYield: FrontierYield,
+  thresholds: FrontierThresholds,
+): boolean {
+  if (frontierYield.queries === 0) {
+    return false;
+  }
+  return (
+    frontierYield.newNodes / frontierYield.queries >=
+      thresholds.minimumNewNodesPerQuery ||
+    frontierYield.newEdges / frontierYield.queries >=
+      thresholds.minimumNewEdgesPerQuery
+  );
+}
+
+export async function readCrawlerHistory(
+  outputRoot: string,
+): Promise<CrawlerHistory> {
+  const history: CrawlerHistory = {
+    targetPrefixes: [],
+    endpoints: new Set(),
+    edges: new Set(),
+  };
+  let entries;
+  try {
+    entries = await readdir(path.join(outputRoot, "snapshots"), {
+      withFileTypes: true,
+    });
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return history;
+    }
+    throw error;
+  }
+
+  for (const entry of entries.filter((candidate) => candidate.isDirectory())) {
+    const snapshotDir = path.join(outputRoot, "snapshots", entry.name);
+    const run = await readOptionalJson(path.join(snapshotDir, "run.json"));
+    if (run && Array.isArray(run.targetPrefixes)) {
+      history.targetPrefixes.push(
+        ...run.targetPrefixes.filter(
+          (prefix): prefix is number =>
+            Number.isInteger(prefix) && prefix >= 0 && prefix <= 255,
+        ),
+      );
+    }
+    for (const node of await readOptionalJsonLines(
+      path.join(snapshotDir, "nodes.jsonl"),
+    )) {
+      if (typeof node.endpoint === "string") {
+        history.endpoints.add(node.endpoint);
+      }
+    }
+    for (const edge of await readOptionalJsonLines(
+      path.join(snapshotDir, "edges.jsonl"),
+    )) {
+      if (typeof edge.source === "string" && typeof edge.target === "string") {
+        history.edges.add(`${edge.source}>${edge.target}`);
+      }
+    }
+  }
+  return history;
+}
+
+function addNovelNode(
+  address: { host: string; port: number },
+  seenNodes: Set<string>,
+): number {
+  const key = endpoint(address);
+  if (seenNodes.has(key)) {
+    return 0;
+  }
+  seenNodes.add(key);
+  return 1;
 }
 
 function graphNode(
@@ -263,6 +423,10 @@ function endpoint(address: { host: string; port: number }): string {
 }
 
 async function runCrawler(options: CrawlerOptions): Promise<void> {
+  const history = await readCrawlerHistory(options.outputRoot);
+  const previouslySeenEndpoints = new Set(history.endpoints);
+  const seenNodes = new Set(history.endpoints);
+  const seenEdges = new Set(history.edges);
   const startedAt = new Date();
   const snapshot = startedAt.toISOString().replaceAll(":", "-");
   const snapshotDir = path.join(options.outputRoot, "snapshots", snapshot);
@@ -271,12 +435,17 @@ async function runCrawler(options: CrawlerOptions): Promise<void> {
   const dht = new HyperDHT();
   const replies: GraphReply[] = [];
   const queries: Array<Record<string, unknown>> = [];
+  const targetPrefixes: number[] = [];
+  const attemptedFrontier = new Set<string>();
 
   await writeJson(path.join(snapshotDir, "run.json"), {
     snapshot,
     startedAt: startedAt.toISOString(),
     targets: options.targets,
-    frontier: options.frontier,
+    frontierPerRound: options.frontier,
+    maximumFrontierRounds: options.frontierRounds,
+    frontierThresholds: options.frontierThresholds,
+    targetPrefixes,
     pid: process.pid,
   });
 
@@ -285,27 +454,75 @@ async function runCrawler(options: CrawlerOptions): Promise<void> {
 
   try {
     for (let index = 0; index < options.targets; index += 1) {
+      const target = nextStratifiedTarget(
+        history.targetPrefixes,
+        targetPrefixes,
+      );
       await collectQuery(
         dht,
-        randomBytes(32),
+        target,
         "seed",
+        0,
         null,
         replies,
         queries,
+        seenNodes,
+        seenEdges,
       );
     }
 
-    const seedGraph = aggregateGraphReplies(replies);
-    const frontier = rankFrontier(seedGraph.nodes, options.frontier);
-    for (const node of frontier) {
-      await collectQuery(
-        dht,
-        randomBytes(32),
-        "frontier",
-        { host: node.host, port: node.port },
-        replies,
-        queries,
+    const frontierYields: FrontierYield[] = [];
+    for (let round = 1; round <= options.frontierRounds; round += 1) {
+      const graph = aggregateGraphReplies(replies);
+      const candidates = rankFrontier(
+        graph.nodes.filter(
+          ({ endpoint }) => !attemptedFrontier.has(endpoint),
+        ),
+        options.frontier,
+        previouslySeenEndpoints,
       );
+      if (candidates.length === 0) {
+        break;
+      }
+
+      const frontierYield: FrontierYield = {
+        queries: 0,
+        newNodes: 0,
+        newEdges: 0,
+      };
+      for (const node of candidates) {
+        attemptedFrontier.add(node.endpoint);
+        const target = nextStratifiedTarget(
+          history.targetPrefixes,
+          targetPrefixes,
+        );
+        const novelty = await collectQuery(
+          dht,
+          target,
+          "frontier",
+          round,
+          { host: node.host, port: node.port },
+          replies,
+          queries,
+          seenNodes,
+          seenEdges,
+        );
+        frontierYield.queries += 1;
+        frontierYield.newNodes += novelty.newNodes;
+        frontierYield.newEdges += novelty.newEdges;
+      }
+      frontierYields.push(frontierYield);
+      console.log(
+        `Frontier ${round}: queries=${frontierYield.queries} newNodes=${frontierYield.newNodes} newEdges=${frontierYield.newEdges}`,
+      );
+      if (
+        !shouldContinueFrontier(
+          frontierYield,
+          options.frontierThresholds,
+        )
+      ) {
+        break;
+      }
     }
 
     const graph = aggregateGraphReplies(replies);
@@ -324,6 +541,17 @@ async function runCrawler(options: CrawlerOptions): Promise<void> {
       observations,
     );
     await writeJsonLines(path.join(snapshotDir, "queries.jsonl"), queries);
+    await writeJson(path.join(snapshotDir, "run.json"), {
+      snapshot,
+      startedAt: startedAt.toISOString(),
+      completedAt: new Date().toISOString(),
+      targets: options.targets,
+      frontierPerRound: options.frontier,
+      maximumFrontierRounds: options.frontierRounds,
+      frontierThresholds: options.frontierThresholds,
+      targetPrefixes,
+      pid: process.pid,
+    });
     await writeJson(path.join(snapshotDir, "summary.json"), {
       snapshot,
       completedAt: new Date().toISOString(),
@@ -333,6 +561,9 @@ async function runCrawler(options: CrawlerOptions): Promise<void> {
       verifiedNodes: graph.nodes.filter(({ verified }) => verified).length,
       advertisedNodes: graph.nodes.filter(({ verified }) => !verified).length,
       edges: graph.edges.length,
+      newNodes: seenNodes.size - history.endpoints.size,
+      newEdges: seenEdges.size - history.edges.size,
+      frontierRounds: frontierYields,
       cnNodes: cnNodes.length,
       cnVerifiedNodes: cnNodes.filter(({ verified }) => verified).length,
     });
@@ -348,13 +579,17 @@ async function collectQuery(
   dht: HyperDhtNode,
   target: Buffer,
   phase: "seed" | "frontier",
+  round: number,
   startNode: { host: string; port: number } | null,
   replies: GraphReply[],
   queries: Array<Record<string, unknown>>,
-): Promise<void> {
+  seenNodes: Set<string>,
+  seenEdges: Set<string>,
+): Promise<QueryNovelty> {
   const startedAt = new Date().toISOString();
   let responseCount = 0;
   let advertisedCount = 0;
+  const novelty: QueryNovelty = { newNodes: 0, newEdges: 0 };
   try {
     const query = dht.findNode(
       target,
@@ -370,35 +605,68 @@ async function collectQuery(
         .filter(
           (node): node is { host: string; port: number } => node !== null,
         );
-      replies.push({
+      const reply = {
         from,
         rtt: raw.rtt,
         closerNodes,
-      });
+      };
+      replies.push(reply);
+      const update = recordGraphNovelty(reply, seenNodes, seenEdges);
+      novelty.newNodes += update.newNodes;
+      novelty.newEdges += update.newEdges;
       responseCount += 1;
       advertisedCount += closerNodes.length;
     }
     queries.push({
       phase,
+      round,
       target: target.toString("hex"),
       startNode,
       startedAt,
       completedAt: new Date().toISOString(),
       responses: responseCount,
       advertised: advertisedCount,
+      ...novelty,
     });
   } catch (error) {
     queries.push({
       phase,
+      round,
       target: target.toString("hex"),
       startNode,
       startedAt,
       completedAt: new Date().toISOString(),
       responses: responseCount,
       advertised: advertisedCount,
+      ...novelty,
       error: error instanceof Error ? error.message : String(error),
     });
   }
+  return novelty;
+}
+
+function nextStratifiedTarget(
+  historicalPrefixes: number[],
+  currentPrefixes: number[],
+): Buffer {
+  const prefix = selectTargetPrefixes(
+    1,
+    [...historicalPrefixes, ...currentPrefixes],
+    shuffledPrefixes(),
+  )[0];
+  const target = randomBytes(32);
+  target[0] = prefix;
+  currentPrefixes.push(prefix);
+  return target;
+}
+
+function shuffledPrefixes(): number[] {
+  const prefixes = Array.from({ length: 256 }, (_, prefix) => prefix);
+  for (let index = prefixes.length - 1; index > 0; index -= 1) {
+    const swap = randomInt(index + 1);
+    [prefixes[index], prefixes[swap]] = [prefixes[swap], prefixes[index]];
+  }
+  return prefixes;
 }
 
 function normalizeEndpoint(
@@ -488,6 +756,48 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
   await rename(temporaryPath, filePath);
 }
 
+async function readOptionalJson(
+  filePath: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function readOptionalJsonLines(
+  filePath: string,
+): Promise<Array<Record<string, unknown>>> {
+  try {
+    const input = await readFile(filePath, "utf8");
+    return input
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
 function parseOptions(argv: string[]): CrawlerOptions {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -501,6 +811,13 @@ function parseOptions(argv: string[]): CrawlerOptions {
 
   const targets = Number(values.get("--targets") ?? 32);
   const frontier = Number(values.get("--frontier") ?? 64);
+  const frontierRounds = Number(values.get("--frontier-rounds") ?? 3);
+  const minimumNewNodesPerQuery = Number(
+    values.get("--min-new-nodes-per-query") ?? 1,
+  );
+  const minimumNewEdgesPerQuery = Number(
+    values.get("--min-new-edges-per-query") ?? 5,
+  );
   const outputRoot = path.resolve(
     values.get("--output") ??
       path.join(os.homedir(), ".local", "state", "kepos-neo", "dht-graph"),
@@ -511,7 +828,31 @@ function parseOptions(argv: string[]): CrawlerOptions {
   if (!Number.isInteger(frontier) || frontier < 0) {
     throw new Error("--frontier must be a non-negative integer");
   }
-  return { targets, frontier, outputRoot };
+  if (!Number.isInteger(frontierRounds) || frontierRounds < 0) {
+    throw new Error("--frontier-rounds must be a non-negative integer");
+  }
+  if (
+    !Number.isFinite(minimumNewNodesPerQuery) ||
+    minimumNewNodesPerQuery < 0
+  ) {
+    throw new Error("--min-new-nodes-per-query must be non-negative");
+  }
+  if (
+    !Number.isFinite(minimumNewEdgesPerQuery) ||
+    minimumNewEdgesPerQuery < 0
+  ) {
+    throw new Error("--min-new-edges-per-query must be non-negative");
+  }
+  return {
+    targets,
+    frontier,
+    frontierRounds,
+    frontierThresholds: {
+      minimumNewNodesPerQuery,
+      minimumNewEdgesPerQuery,
+    },
+    outputRoot,
+  };
 }
 
 const entrypoint = process.argv[1]
