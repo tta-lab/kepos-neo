@@ -36,8 +36,7 @@ export interface SetupPublisherOptions {
 
 export interface SetupPublisherResult {
   created: boolean;
-  homeKey: string;
-  services: Array<{ id: string; serviceKey: string }>;
+  publisherKey: string;
 }
 
 export type SetupPublisherCliOptions = Omit<SetupPublisherOptions, "log">;
@@ -92,23 +91,18 @@ export function parseSetupPublisherCliOptions(
 function createManifest(options: SetupPublisherOptions): PublisherManifest {
   return parsePublisherManifest({
     displayName: options.displayName,
-    homeConfig: "home.publisher.json",
+    publisherConfig: "publisher.json",
     services: options.services.map(
       (service): PublisherService => ({
         ...service,
         kind: "tcp",
-        config: `${service.id}.publisher.json`,
       }),
     ),
   });
 }
 
 function expectedNames(manifest: PublisherManifest): string[] {
-  return [
-    manifestFileName,
-    manifest.homeConfig,
-    ...manifest.services.map((service) => service.config),
-  ];
+  return [manifestFileName, manifest.publisherConfig];
 }
 
 async function readPublisherResult(
@@ -125,27 +119,19 @@ async function readPublisherResult(
     throw new Error("existing publisher manifest does not match requested topology");
   }
 
-  const configEntries = [
-    { id: "home", config: storedManifest.homeConfig },
-    ...storedManifest.services.map((service) => ({ id: service.id, config: service.config })),
-  ];
-  const keys = await Promise.all(
-    configEntries.map(async ({ id, config }) => {
-      const publisher = parsePublisherConfig(await readStateJson(path.join(stateDir, config)));
-      if (
-        publisher.allow.length !== expectedAllow.length ||
-        publisher.allow.some((key, index) => key !== expectedAllow[index])
-      ) {
-        throw new Error(`existing publisher allowlist does not match requested clients: ${config}`);
-      }
-      return { id, serviceKey: derivePublisherHomeKey(publisher.seed) };
-    }),
+  const publisher = parsePublisherConfig(
+    await readStateJson(path.join(stateDir, storedManifest.publisherConfig)),
   );
+  if (
+    publisher.allow.length !== expectedAllow.length ||
+    publisher.allow.some((key, index) => key !== expectedAllow[index])
+  ) {
+    throw new Error("existing publisher allowlist does not match requested subscribers");
+  }
 
   return {
     created,
-    homeKey: keys[0].serviceKey,
-    services: keys.slice(1),
+    publisherKey: derivePublisherHomeKey(publisher.seed),
   };
 }
 
@@ -167,24 +153,15 @@ export async function setupPublisher(
     const files = new Map<string, string>([
       [manifestFileName, serializePublisherManifest(manifest)],
       [
-        manifest.homeConfig,
+        manifest.publisherConfig,
         serializePublisherConfig({ seed: generatePublisherSeed(), allow }),
       ],
-      ...manifest.services.map(
-        (service): [string, string] => [
-          service.config,
-          serializePublisherConfig({ seed: generatePublisherSeed(), allow }),
-        ],
-      ),
     ]);
     await writeStateDirectoryAtomically(stateDir, files);
     result = await readPublisherResult(stateDir, manifest, allow, true);
   }
 
-  log(`Home public key: ${result.homeKey}`);
-  for (const service of result.services) {
-    log(`${service.id} public key: ${service.serviceKey}`);
-  }
+  log(`Publisher public key: ${result.publisherKey}`);
   return result;
 }
 

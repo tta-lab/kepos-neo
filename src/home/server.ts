@@ -8,8 +8,10 @@ import { parsePublisherConfig } from "../config.js";
 import { derivePublisherHomeKey } from "../keys.js";
 import {
   createHomeRegistry,
+  createMuxHomeRegistry,
   type CreateHomeRegistryOptions,
   type HomeRegistryService,
+  type MuxHomeRegistryService,
 } from "./registry.js";
 
 const host = "127.0.0.1" as const;
@@ -31,6 +33,13 @@ export interface StartHomeServerOptions {
   port?: number;
   displayName?: string;
   services?: HomeRegistryService[];
+}
+
+export interface StartMuxHomeServerOptions {
+  publisherKey: string;
+  port?: number;
+  displayName?: string;
+  services?: MuxHomeRegistryService[];
 }
 
 export interface HomeCliOptions {
@@ -94,6 +103,27 @@ export async function startHomeServer({
 }: StartHomeServerOptions): Promise<RunningHomeServer> {
   const registryOptions: CreateHomeRegistryOptions = { displayName, services };
   const registry = createHomeRegistry(homeKey, registryOptions);
+  return startHomeServerWithRegistry(registry, port);
+}
+
+export async function startMuxHomeServer({
+  publisherKey,
+  port = 0,
+  displayName = "Local Publisher",
+  services = [],
+}: StartMuxHomeServerOptions): Promise<RunningHomeServer> {
+  const registry = createMuxHomeRegistry({
+    publisherKey,
+    displayName,
+    services,
+  });
+  return startHomeServerWithRegistry(registry, port);
+}
+
+async function startHomeServerWithRegistry(
+  registry: { revision: number },
+  port: number,
+): Promise<RunningHomeServer> {
   const registryEtag = `"${registry.revision}"`;
   const [homeHtml, homeCss] = await Promise.all([
     readFile(path.join(defaultHomeDirectory, "index.html")),

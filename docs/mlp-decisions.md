@@ -182,9 +182,9 @@ such as Alice to `publisherKey`. After authentication, Registry entries name
 services by `serviceId`; they do not contain service keys. Opening a service is
 an authenticated multiplex operation on the existing publisher connection.
 
-The current P0 `homeKey` becomes `publisherKey` during migration. Current
-per-service keys and Hypertele child processes remain test fixtures until the
-multiplex daemon replaces them; they are not part of the target protocol.
+The dogfood daemon now uses `publisherKey` and one persistent multiplex
+connection. The older P0 `homeKey`, per-service keys, and Hypertele child
+processes remain only as P0 test fixtures; they are not part of this protocol.
 
 Rotating `publisherKey` requires re-pairing. A later Person root could sign a
 replacement publisher key, but that recovery layer is explicitly deferred.

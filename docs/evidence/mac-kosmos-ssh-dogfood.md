@@ -2,7 +2,29 @@
 
 Date: 2026-07-17
 
-## Path
+The public-path samples below record the earlier one-process-per-service
+dogfood. The current branch replaces that runtime with one persistent
+Protomux connection while keeping the P0 tests as historical fixtures.
+
+## Persistent multiplex proof
+
+The current isolated-DHT suite proves:
+
+- one subscriber connection carries Home, a Navidrome-like HTTP stream, and
+  an SSH-like half-closed TCP exchange concurrently;
+- each actual TCP connection has an independent Protomux channel;
+- closing one channel does not close the publisher connection;
+- one publisher accepts several allowlisted subscribers concurrently;
+- an unknown subscriber is rejected before entering the mux;
+- publisher restart triggers background subscriber reconnect without changing
+  local Home or service ports;
+- active TCP stream recovery after a dropped outer connection remains
+  deferred.
+
+This proof is automated. A new cross-building public-path sample for the mux
+runtime has not yet been recorded.
+
+## Earlier public-path proof
 
 ```text
 Mac ssh/scp

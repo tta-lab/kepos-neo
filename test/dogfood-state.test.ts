@@ -1,11 +1,23 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { parseClientContact, parsePublisherConfig, parsePublisherManifest } from "../src/config.js";
-import { derivePublisherHomeKey, parseClientIdentity } from "../src/keys.js";
+import {
+  parsePublisherConfig,
+  parsePublisherManifest,
+  parseSubscriberContact,
+} from "../src/config.js";
+import { parseClientIdentity } from "../src/keys.js";
 import { updatePublisherAllowlist } from "../src/dogfood/allow.js";
 import {
   parseSetupClientCliOptions,
@@ -26,8 +38,8 @@ async function readJson(filePath: string): Promise<unknown> {
   return JSON.parse(await readFile(filePath, "utf8")) as unknown;
 }
 
-test("client setup creates and preserves one owner-only identity", async () => {
-  const stateDir = await temporaryState("client");
+test("subscriber setup creates and preserves one owner-only identity", async () => {
+  const stateDir = await temporaryState("subscriber");
   const first = await setupClient({ stateDir, log: () => undefined });
   const identityPath = path.join(stateDir, "client.identity.json");
   const identity = parseClientIdentity(await readJson(identityPath));
@@ -40,80 +52,62 @@ test("client setup creates and preserves one owner-only identity", async () => {
     assert.equal((await stat(identityPath)).mode & 0o777, 0o600);
   }
 
-  const second = await setupClient({ stateDir, log: () => undefined });
-  assert.deepEqual(second, { created: false, publicKey: identity.publicKey });
-  assert.deepEqual(parseClientIdentity(await readJson(identityPath)), identity);
+  assert.deepEqual(await setupClient({ stateDir, log: () => undefined }), {
+    created: false,
+    publicKey: identity.publicKey,
+  });
 });
 
-test("publisher setup creates Home and TCP seeds locally with one shared allowlist", async () => {
-  const clientStateDir = await temporaryState("client");
-  const publisherStateDir = await temporaryState("publisher");
-  const client = await setupClient({ stateDir: clientStateDir, log: () => undefined });
+test("publisher setup creates one key and one shared allowlist", async () => {
+  const subscriberState = await temporaryState("subscriber");
+  const publisherState = await temporaryState("publisher");
+  const subscriber = await setupClient({
+    stateDir: subscriberState,
+    log: () => undefined,
+  });
   const result = await setupPublisher({
-    stateDir: publisherStateDir,
+    stateDir: publisherState,
     displayName: "kosmos",
-    clientPublicKeys: [client.publicKey],
+    clientPublicKeys: [subscriber.publicKey],
     services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     log: () => undefined,
   });
 
-  const manifest = parsePublisherManifest(
-    await readJson(path.join(publisherStateDir, "publisher.manifest.json")),
+  assert.deepEqual(await readdir(publisherState), [
+    "publisher.json",
+    "publisher.manifest.json",
+  ]);
+  assert.deepEqual(
+    parsePublisherManifest(
+      await readJson(path.join(publisherState, "publisher.manifest.json")),
+    ),
+    {
+      displayName: "kosmos",
+      publisherConfig: "publisher.json",
+      services: [
+        { id: "ssh", name: "SSH", kind: "tcp", targetPort: 22 },
+      ],
+    },
   );
-  const home = parsePublisherConfig(
-    await readJson(path.join(publisherStateDir, "home.publisher.json")),
+  const config = parsePublisherConfig(
+    await readJson(path.join(publisherState, "publisher.json")),
   );
-  const ssh = parsePublisherConfig(
-    await readJson(path.join(publisherStateDir, "ssh.publisher.json")),
-  );
-
-  assert.deepEqual(manifest, {
-    displayName: "kosmos",
-    homeConfig: "home.publisher.json",
-    services: [
-      {
-        id: "ssh",
-        name: "SSH",
-        kind: "tcp",
-        targetPort: 22,
-        config: "ssh.publisher.json",
-      },
-    ],
-  });
-  assert.deepEqual(home.allow, [client.publicKey]);
-  assert.deepEqual(ssh.allow, [client.publicKey]);
-  assert.notEqual(home.seed, ssh.seed);
-  assert.deepEqual(result, {
-    created: true,
-    homeKey: derivePublisherHomeKey(home.seed),
-    services: [{ id: "ssh", serviceKey: derivePublisherHomeKey(ssh.seed) }],
-  });
-
-  const serializedState = (
-    await Promise.all(
-      (await readdir(publisherStateDir)).map((name) =>
-        readFile(path.join(publisherStateDir, name), "utf8"),
-      ),
-    )
-  ).join("");
-  assert.equal(serializedState.includes("secretKey"), false);
+  assert.deepEqual(config.allow, [subscriber.publicKey]);
+  assert.match(result.publisherKey, /^[0-9a-f]{64}$/);
+  assert.equal("homeKey" in result, false);
 });
 
 test("publisher setup preserves valid state and rejects changed topology", async () => {
   const stateDir = await temporaryState("publisher");
-  const clientKey = "11".repeat(32);
   const options = {
     stateDir,
     displayName: "kosmos",
-    clientPublicKeys: [clientKey],
+    clientPublicKeys: ["11".repeat(32)],
     services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     log: () => undefined,
   };
   const first = await setupPublisher(options);
-  const second = await setupPublisher(options);
-
-  assert.equal(first.created, true);
-  assert.deepEqual(second, { ...first, created: false });
+  assert.deepEqual(await setupPublisher(options), { ...first, created: false });
   await assert.rejects(
     () =>
       setupPublisher({
@@ -124,18 +118,17 @@ test("publisher setup preserves valid state and rejects changed topology", async
   );
 });
 
-test("client contact contains public publisher data only", async () => {
-  const stateDir = await temporaryState("client-contact");
+test("subscriber contact contains one public publisher key", async () => {
+  const stateDir = await temporaryState("subscriber-contact");
   await setupClient({ stateDir, log: () => undefined });
   const contactPath = await writePublisherContact({
     stateDir,
     label: "kosmos",
-    homeKey: "22".repeat(32),
+    publisherKey: "22".repeat(32),
   });
 
-  assert.equal(contactPath, path.join(stateDir, "publisher.contact.json"));
-  assert.deepEqual(parseClientContact(await readJson(contactPath)), {
-    homeKey: "22".repeat(32),
+  assert.deepEqual(parseSubscriberContact(await readJson(contactPath)), {
+    publisherKey: "22".repeat(32),
     label: "kosmos",
     requestedLocalPort: 0,
   });
@@ -146,11 +139,11 @@ test("client contact contains public publisher data only", async () => {
 });
 
 test("role-separated setup rejects partial or unsafe existing state", async () => {
-  const clientDir = await temporaryState("unsafe-client");
-  await setupClient({ stateDir: clientDir, log: () => undefined });
-  await writeFile(path.join(clientDir, "unexpected.json"), "{}\n");
+  const subscriberDir = await temporaryState("unsafe-subscriber");
+  await setupClient({ stateDir: subscriberDir, log: () => undefined });
+  await writeFile(path.join(subscriberDir, "unexpected.json"), "{}\n");
   await assert.rejects(
-    () => setupClient({ stateDir: clientDir, log: () => undefined }),
+    () => setupClient({ stateDir: subscriberDir, log: () => undefined }),
     /partial|invalid|unexpected/i,
   );
 
@@ -162,9 +155,9 @@ test("role-separated setup rejects partial or unsafe existing state", async () =
     services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     log: () => undefined,
   });
-  const homeConfig = path.join(publisherDir, "home.publisher.json");
+  const configPath = path.join(publisherDir, "publisher.json");
   if (process.platform !== "win32") {
-    await chmod(homeConfig, 0o644);
+    await chmod(configPath, 0o644);
     await assert.rejects(
       () =>
         setupPublisher({
@@ -176,10 +169,9 @@ test("role-separated setup rejects partial or unsafe existing state", async () =
         }),
       /mode|permission|owner/i,
     );
-    await chmod(homeConfig, 0o600);
+    await chmod(configPath, 0o600);
   }
-
-  await rm(path.join(publisherDir, "ssh.publisher.json"));
+  await rm(configPath);
   await assert.rejects(
     () =>
       setupPublisher({
@@ -189,11 +181,11 @@ test("role-separated setup rejects partial or unsafe existing state", async () =
         services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
         log: () => undefined,
       }),
-    /partial|invalid|ssh/i,
+    /partial|invalid|publisher/i,
   );
 });
 
-test("setup CLIs parse explicit role-local state and public configuration", () => {
+test("setup CLIs and allowlist update use the shared publisher config", async () => {
   assert.deepEqual(parseSetupClientCliOptions(["--state", "./client"]), {
     stateDir: path.resolve("./client"),
   });
@@ -215,9 +207,7 @@ test("setup CLIs parse explicit role-local state and public configuration", () =
       services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     },
   );
-});
 
-test("publisher allowlist update applies revocation to every service without rotating seeds", async () => {
   const stateDir = await temporaryState("publisher-revoke");
   await setupPublisher({
     stateDir,
@@ -226,23 +216,11 @@ test("publisher allowlist update applies revocation to every service without rot
     services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     log: () => undefined,
   });
-  const homePath = path.join(stateDir, "home.publisher.json");
-  const sshPath = path.join(stateDir, "ssh.publisher.json");
-  const originalHome = parsePublisherConfig(await readJson(homePath));
-  const originalSsh = parsePublisherConfig(await readJson(sshPath));
-
+  const configPath = path.join(stateDir, "publisher.json");
+  const original = parsePublisherConfig(await readJson(configPath));
   await updatePublisherAllowlist({ stateDir, clientPublicKeys: [] });
-
-  assert.deepEqual(parsePublisherConfig(await readJson(homePath)), {
-    seed: originalHome.seed,
+  assert.deepEqual(parsePublisherConfig(await readJson(configPath)), {
+    seed: original.seed,
     allow: [],
   });
-  assert.deepEqual(parsePublisherConfig(await readJson(sshPath)), {
-    seed: originalSsh.seed,
-    allow: [],
-  });
-  if (process.platform !== "win32") {
-    assert.equal((await stat(homePath)).mode & 0o777, 0o600);
-    assert.equal((await stat(sshPath)).mode & 0o777, 0o600);
-  }
 });

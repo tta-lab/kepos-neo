@@ -9,23 +9,28 @@ export interface ClientContact {
   requestedLocalPort: number;
 }
 
+export interface SubscriberContact {
+  publisherKey: string;
+  label: string;
+  requestedLocalPort: number;
+}
+
 export interface PublisherService {
   id: string;
   name: string;
   kind: "tcp";
   targetPort: number;
-  config: string;
 }
 
 export interface PublisherManifest {
   displayName: string;
-  homeConfig: string;
+  publisherConfig: string;
   services: PublisherService[];
 }
 
 const keyHexPattern = /^[0-9a-f]{64}$/;
 const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
-const publisherConfigFilePattern = /^[a-z0-9][a-z0-9.-]*\.publisher\.json$/;
+const publisherConfigFilePattern = /^publisher\.json$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -119,14 +124,55 @@ export function serializeClientContact(contact: ClientContact): string {
   return `${JSON.stringify(parseClientContact(contact), null, 2)}\n`;
 }
 
+export function parseSubscriberContact(value: unknown): SubscriberContact {
+  if (!isRecord(value)) {
+    throw new Error("subscriber contact must be an object");
+  }
+  rejectUnknownFields(
+    value,
+    ["publisherKey", "label", "requestedLocalPort"],
+    "subscriber contact",
+  );
+
+  const publisherKey = parseKeyHex(value.publisherKey, "publisherKey");
+  if (typeof value.label !== "string" || value.label.trim().length === 0) {
+    throw new Error("label must be a non-empty string");
+  }
+  if (
+    typeof value.requestedLocalPort !== "number" ||
+    !Number.isInteger(value.requestedLocalPort) ||
+    value.requestedLocalPort < 0 ||
+    value.requestedLocalPort > 65_535
+  ) {
+    throw new Error("requestedLocalPort must be an integer from 0 through 65535");
+  }
+
+  return {
+    publisherKey,
+    label: value.label,
+    requestedLocalPort: value.requestedLocalPort,
+  };
+}
+
+export function serializeSubscriberContact(contact: SubscriberContact): string {
+  return `${JSON.stringify(parseSubscriberContact(contact), null, 2)}\n`;
+}
+
 export function parsePublisherManifest(value: unknown): PublisherManifest {
   if (!isRecord(value)) {
     throw new Error("publisher manifest must be an object");
   }
-  rejectUnknownFields(value, ["displayName", "homeConfig", "services"], "publisher manifest");
+  rejectUnknownFields(
+    value,
+    ["displayName", "publisherConfig", "services"],
+    "publisher manifest",
+  );
 
   const displayName = parseNonEmptyString(value.displayName, "displayName");
-  const homeConfig = parsePublisherConfigFile(value.homeConfig, "homeConfig");
+  const publisherConfig = parsePublisherConfigFile(
+    value.publisherConfig,
+    "publisherConfig",
+  );
   if (!Array.isArray(value.services)) {
     throw new Error("services must be an array");
   }
@@ -138,7 +184,7 @@ export function parsePublisherManifest(value: unknown): PublisherManifest {
     }
     rejectUnknownFields(
       entry,
-      ["id", "name", "kind", "targetPort", "config"],
+      ["id", "name", "kind", "targetPort"],
       `services[${index}]`,
     );
 
@@ -162,11 +208,10 @@ export function parsePublisherManifest(value: unknown): PublisherManifest {
       name: parseNonEmptyString(entry.name, `services[${index}].name`),
       kind: entry.kind,
       targetPort: parseTargetPort(entry.targetPort),
-      config: parsePublisherConfigFile(entry.config, `services[${index}].config`),
     };
   });
 
-  return { displayName, homeConfig, services };
+  return { displayName, publisherConfig, services };
 }
 
 export function serializePublisherManifest(manifest: PublisherManifest): string {

@@ -3,9 +3,11 @@ import { test } from "node:test";
 
 import {
   parseClientContact,
+  parseSubscriberContact,
   parsePublisherManifest,
   parsePublisherConfig,
   serializeClientContact,
+  serializeSubscriberContact,
   serializePublisherManifest,
   serializePublisherConfig,
 } from "../src/config.js";
@@ -98,17 +100,29 @@ test("client contact rejects an invalid requested local port", () => {
   );
 });
 
-test("publisher manifest round-trips Home and configurable loopback TCP services", () => {
+test("subscriber contact round-trips one pinned publisher key", () => {
+  const contact = {
+    publisherKey: publicKey,
+    label: "Local Publisher",
+    requestedLocalPort: 0,
+  };
+
+  assert.deepEqual(
+    parseSubscriberContact(JSON.parse(serializeSubscriberContact(contact))),
+    contact,
+  );
+});
+
+test("publisher manifest round-trips one config and loopback TCP services", () => {
   const manifest = {
     displayName: "kosmos",
-    homeConfig: "home.publisher.json",
+    publisherConfig: "publisher.json",
     services: [
       {
         id: "ssh",
         name: "SSH",
         kind: "tcp" as const,
         targetPort: 22,
-        config: "ssh.publisher.json",
       },
     ],
   };
@@ -125,7 +139,6 @@ test("publisher manifest rejects duplicate, reserved, or unsafe service identifi
     name: "SSH",
     kind: "tcp",
     targetPort: 22,
-    config: "ssh.publisher.json",
   };
 
   for (const services of [
@@ -137,7 +150,7 @@ test("publisher manifest rejects duplicate, reserved, or unsafe service identifi
       () =>
         parsePublisherManifest({
           displayName: "kosmos",
-          homeConfig: "home.publisher.json",
+          publisherConfig: "publisher.json",
           services,
         }),
       /service|id|duplicate|reserved/i,
@@ -148,14 +161,13 @@ test("publisher manifest rejects duplicate, reserved, or unsafe service identifi
 test("publisher manifest rejects arbitrary targets and unsafe config paths", () => {
   const base = {
     displayName: "kosmos",
-    homeConfig: "home.publisher.json",
+    publisherConfig: "publisher.json",
     services: [
       {
         id: "ssh",
         name: "SSH",
         kind: "tcp",
         targetPort: 22,
-        config: "ssh.publisher.json",
       },
     ],
   };
@@ -172,7 +184,7 @@ test("publisher manifest rejects arbitrary targets and unsafe config paths", () 
     () =>
       parsePublisherManifest({
         ...base,
-        services: [{ ...base.services[0], config: "../ssh.publisher.json" }],
+        publisherConfig: "../publisher.json",
       }),
     /config/i,
   );

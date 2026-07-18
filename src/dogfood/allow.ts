@@ -25,27 +25,21 @@ export async function updatePublisherAllowlist(
   const manifest = parsePublisherManifest(
     await readStateJson(path.join(stateDir, "publisher.manifest.json")),
   );
-  const configNames = [
-    manifest.homeConfig,
-    ...manifest.services.map((service) => service.config),
-  ];
-  const expectedNames = ["publisher.manifest.json", ...configNames];
+  const expectedNames = ["publisher.manifest.json", manifest.publisherConfig];
   await validateStateDirectory(stateDir, expectedNames);
   const allow = parsePublisherConfig({
     seed: "00".repeat(32),
     allow: options.clientPublicKeys,
   }).allow;
 
-  for (const configName of configNames) {
-    const config = parsePublisherConfig(
-      await readStateJson(path.join(stateDir, configName)),
-    );
-    await writeStateFileAtomically(
-      stateDir,
-      configName,
-      serializePublisherConfig({ seed: config.seed, allow }),
-    );
-  }
+  const config = parsePublisherConfig(
+    await readStateJson(path.join(stateDir, manifest.publisherConfig)),
+  );
+  await writeStateFileAtomically(
+    stateDir,
+    manifest.publisherConfig,
+    serializePublisherConfig({ seed: config.seed, allow }),
+  );
   await validateStateDirectory(stateDir, expectedNames);
 }
 

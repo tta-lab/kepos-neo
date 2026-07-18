@@ -2,9 +2,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  parseClientContact,
-  serializeClientContact,
-  type ClientContact,
+  parseSubscriberContact,
+  serializeSubscriberContact,
+  type SubscriberContact,
 } from "../config.js";
 import {
   generateClientIdentity,
@@ -36,7 +36,7 @@ export interface SetupClientResult {
 export interface WritePublisherContactOptions {
   stateDir?: string;
   label: string;
-  homeKey: string;
+  publisherKey: string;
 }
 
 export interface SetupClientCliOptions {
@@ -88,15 +88,15 @@ export async function writePublisherContact(
 ): Promise<string> {
   const stateDir = path.resolve(options.stateDir ?? path.join("tmp", "dogfood", "client"));
   await readClientIdentity(stateDir);
-  const contact: ClientContact = parseClientContact({
-    homeKey: options.homeKey,
+  const contact: SubscriberContact = parseSubscriberContact({
+    publisherKey: options.publisherKey,
     label: options.label,
     requestedLocalPort: 0,
   });
   return writeStateFileAtomically(
     stateDir,
     contactFileName,
-    serializeClientContact(contact),
+    serializeSubscriberContact(contact),
   );
 }
 

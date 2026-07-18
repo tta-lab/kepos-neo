@@ -6,14 +6,14 @@ import { writePublisherContact } from "./setup-client.js";
 interface ContactCliOptions {
   stateDir: string;
   label: string;
-  homeKey: string;
+  publisherKey: string;
 }
 
 function parseContactCliOptions(arguments_: readonly string[]): ContactCliOptions {
   const options: ContactCliOptions = {
     stateDir: path.resolve("tmp", "dogfood", "client"),
     label: "",
-    homeKey: "",
+    publisherKey: "",
   };
   for (let index = 0; index < arguments_.length; index += 2) {
     const option = arguments_[index] ?? "option";
@@ -26,14 +26,14 @@ function parseContactCliOptions(arguments_: readonly string[]): ContactCliOption
       options.label = value;
       continue;
     }
-    if (option === "--home-key") {
-      options.homeKey = value;
+    if (option === "--publisher-key") {
+      options.publisherKey = value;
       continue;
     }
     throw new Error(`unknown publisher contact option: ${option}`);
   }
-  if (!options.label || !options.homeKey) {
-    throw new Error("--label and --home-key are required");
+  if (!options.label || !options.publisherKey) {
+    throw new Error("--label and --publisher-key are required");
   }
   return options;
 }
