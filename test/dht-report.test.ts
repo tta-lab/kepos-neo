@@ -5,6 +5,7 @@ import {
   buildReportModel,
   enrichHosts,
   formatCountryLabel,
+  isStableCandidate,
   parseObservationJsonl,
   renderReportHtml,
   type GeoRecord,
@@ -38,6 +39,18 @@ const summaries: NodeSummary[] = [
 const observations: NodeObservation[] = [
   {
     timestamp: "2026-07-18T00:05:00.000Z",
+    host: "1.0.1.42",
+    port: 49_737,
+    source: "lookup",
+  },
+  {
+    timestamp: "2026-07-18T12:05:00.000Z",
+    host: "1.0.1.42",
+    port: 49_737,
+    source: "routing",
+  },
+  {
+    timestamp: "2026-07-19T12:05:00.000Z",
     host: "1.0.1.42",
     port: 49_737,
     source: "lookup",
@@ -83,7 +96,7 @@ test("builds geographic, country, ASN, and hourly report data", () => {
   const model = buildReportModel(observations, summaries, geos);
 
   assert.deepEqual(model.totals, {
-    observations: 2,
+    observations: 4,
     endpoints: 2,
     locatedEndpoints: 2,
     stableEndpoints: 1,
@@ -121,6 +134,8 @@ test("builds geographic, country, ASN, and hourly report data", () => {
   assert.deepEqual(model.timeline, [
     { hour: "2026-07-18T00:00:00.000Z", observations: 1, endpoints: 1 },
     { hour: "2026-07-18T01:00:00.000Z", observations: 1, endpoints: 1 },
+    { hour: "2026-07-18T12:00:00.000Z", observations: 1, endpoints: 1 },
+    { hour: "2026-07-19T12:00:00.000Z", observations: 1, endpoints: 1 },
   ]);
 });
 
@@ -161,5 +176,61 @@ test("country charts show the full name with the ISO code", () => {
   assert.equal(
     formatCountryLabel({ country: "China", countryCode: "CN" }),
     "China (CN)",
+  );
+});
+
+test("stable candidates use post-processing span, bucket, count, and recency thresholds", () => {
+  const summary: NodeSummary = {
+    ...summaries[0],
+    lastSeen: "2026-07-19T00:05:00.000Z",
+  };
+  const endpointObservations: NodeObservation[] = [
+    {
+      timestamp: "2026-07-18T00:05:00.000Z",
+      host: "1.0.1.42",
+      port: 49_737,
+      source: "lookup",
+    },
+    {
+      timestamp: "2026-07-18T12:05:00.000Z",
+      host: "1.0.1.42",
+      port: 49_737,
+      source: "lookup",
+    },
+    {
+      timestamp: "2026-07-19T00:05:00.000Z",
+      host: "1.0.1.42",
+      port: 49_737,
+      source: "lookup",
+    },
+  ];
+
+  assert.equal(
+    isStableCandidate(
+      summary,
+      endpointObservations,
+      "2026-07-19T01:00:00.000Z",
+      {
+        minimumSpanHours: 24,
+        minimumObservations: 3,
+        minimumDistinctHours: 3,
+        maximumStaleHours: 2,
+      },
+    ),
+    true,
+  );
+  assert.equal(
+    isStableCandidate(
+      summary,
+      endpointObservations,
+      "2026-07-19T03:00:00.000Z",
+      {
+        minimumSpanHours: 24,
+        minimumObservations: 3,
+        minimumDistinctHours: 3,
+        maximumStaleHours: 2,
+      },
+    ),
+    false,
   );
 });

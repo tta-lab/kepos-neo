@@ -54,11 +54,6 @@ interface HyperDhtConstructor {
   new (): HyperDhtNode;
 }
 
-interface CandidateOptions {
-  minimumObservations: number;
-  minimumSpanMs: number;
-}
-
 interface CrawlerOptions {
   durationHours: number;
   intervalSeconds: number;
@@ -150,22 +145,6 @@ export function summarizeObservations(
   return [...summaries.values()].sort((left, right) =>
     left.endpoint.localeCompare(right.endpoint),
   );
-}
-
-export function candidateNodes(
-  summaries: NodeSummary[],
-  ranges: Ipv4Range[],
-  options: CandidateOptions,
-): NodeSummary[] {
-  return summaries.filter((summary) => {
-    const span =
-      Date.parse(summary.lastSeen) - Date.parse(summary.firstSeen);
-    return (
-      isCnIpv4(summary.host, ranges) &&
-      summary.observations >= options.minimumObservations &&
-      span >= options.minimumSpanMs
-    );
-  });
 }
 
 async function runCrawler(options: CrawlerOptions): Promise<void> {
@@ -432,10 +411,6 @@ async function writeSummary(
     observationCount,
     endpointCount: nodes.length,
     cnEndpointCount: cnNodes.length,
-    candidates: candidateNodes(nodes, ranges, {
-      minimumObservations: 3,
-      minimumSpanMs: 24 * 60 * 60 * 1_000,
-    }),
     cnNodes,
   });
 }

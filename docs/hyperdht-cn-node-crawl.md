@@ -18,8 +18,7 @@ npm run crawl:dht -- \
 The crawler performs one random DHT lookup per minute. It writes:
 
 - `observations.jsonl`: crash-safe endpoint observations;
-- `summary.json`: all mainland China endpoints and candidates seen at least
-  three times across at least 24 hours;
+- `summary.json`: factual endpoint counts and all mainland China endpoints;
 - `run.json`: process ID and planned stop time;
 - `errors.jsonl`: lookup failures, when present.
 
@@ -37,11 +36,17 @@ Generate the geographic report after or during a crawl:
 ```sh
 npm run report:dht -- \
   --input ~/.local/state/kepos-neo/dht-crawl \
-  --enrich
+  --enrich \
+  --stable-min-hours 24 \
+  --stable-min-observations 6 \
+  --stable-min-buckets 3 \
+  --stable-max-stale-hours 2
 ```
 
 `--enrich` looks up missing IP locations one at a time and caches them in
 `geo-cache.json`. Later report runs reuse the cache and can omit the flag. The
 generated `report.html` contains the collected data and uses Plotly from its
 CDN to render the world map, country and ASN rankings, hourly reach, and node
-stability.
+stability. Stability thresholds are report-only parameters: they never alter
+or filter `observations.jsonl`, so the same crawl can be reprocessed with
+different definitions.

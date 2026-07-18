@@ -20,8 +20,24 @@ export interface GeoRecord {
   organization: string;
 }
 
+export interface StabilityCriteria {
+  minimumSpanHours: number;
+  minimumObservations: number;
+  minimumDistinctHours: number;
+  maximumStaleHours: number;
+}
+
+export const DEFAULT_STABILITY_CRITERIA: StabilityCriteria = {
+  minimumSpanHours: 24,
+  minimumObservations: 6,
+  minimumDistinctHours: 3,
+  maximumStaleHours: 2,
+};
+
 interface ReportPoint extends GeoRecord, NodeSummary {
   spanHours: number;
+  distinctHours: number;
+  staleHours: number;
   stable: boolean;
 }
 
@@ -48,6 +64,7 @@ interface TimelineBucket {
 
 interface ReportModel {
   generatedAt: string;
+  stabilityCriteria: StabilityCriteria;
   totals: {
     observations: number;
     endpoints: number;
@@ -72,13 +89,21 @@ interface ReportOptions {
   inputDir: string;
   outputPath: string;
   cachePath: string;
+  stabilityCriteria: StabilityCriteria;
 }
 
 export function buildReportModel(
   observations: NodeObservation[],
   summaries: NodeSummary[],
   geos: Map<string, GeoRecord>,
+  stabilityCriteria: StabilityCriteria = DEFAULT_STABILITY_CRITERIA,
 ): ReportModel {
+  const latestObservation = observations.reduce(
+    (latest, observation) =>
+      observation.timestamp > latest ? observation.timestamp : latest,
+    "",
+  );
+  const observationsByEndpoint = groupObservationsByEndpoint(observations);
   const points = summaries.flatMap((summary): ReportPoint[] => {
     const geo = geos.get(summary.host);
     if (!geo) {
@@ -87,12 +112,25 @@ export function buildReportModel(
     const spanHours =
       (Date.parse(summary.lastSeen) - Date.parse(summary.firstSeen)) /
       (60 * 60 * 1_000);
+    const endpointObservations =
+      observationsByEndpoint.get(summary.endpoint) ?? [];
+    const distinctHours = observationHours(endpointObservations).size;
+    const staleHours =
+      (Date.parse(latestObservation) - Date.parse(summary.lastSeen)) /
+      (60 * 60 * 1_000);
     return [
       {
         ...geo,
         ...summary,
         spanHours,
-        stable: summary.observations >= 3 && spanHours >= 24,
+        distinctHours,
+        staleHours,
+        stable: isStableCandidate(
+          summary,
+          endpointObservations,
+          latestObservation,
+          stabilityCriteria,
+        ),
       },
     ];
   });
@@ -101,6 +139,7 @@ export function buildReportModel(
 
   return {
     generatedAt: new Date().toISOString(),
+    stabilityCriteria,
     totals: {
       observations: observations.length,
       endpoints: summaries.length,
@@ -143,6 +182,26 @@ export function formatCountryLabel(country: {
   return `${country.country} (${country.countryCode})`;
 }
 
+export function isStableCandidate(
+  summary: NodeSummary,
+  observations: NodeObservation[],
+  latestObservation: string,
+  criteria: StabilityCriteria,
+): boolean {
+  const spanHours =
+    (Date.parse(summary.lastSeen) - Date.parse(summary.firstSeen)) /
+    (60 * 60 * 1_000);
+  const staleHours =
+    (Date.parse(latestObservation) - Date.parse(summary.lastSeen)) /
+    (60 * 60 * 1_000);
+  return (
+    spanHours >= criteria.minimumSpanHours &&
+    summary.observations >= criteria.minimumObservations &&
+    observationHours(observations).size >= criteria.minimumDistinctHours &&
+    staleHours <= criteria.maximumStaleHours
+  );
+}
+
 export function renderReportHtml(model: ReportModel): string {
   const data = JSON.stringify(model).replaceAll("<", "\\u003c");
   return `<!doctype html>
@@ -171,7 +230,7 @@ export function renderReportHtml(model: ReportModel): string {
 <body>
   <main>
     <h1>HyperDHT geography</h1>
-    <div class="muted">IP-derived locations; stability means ≥3 observations spanning ≥24 hours.</div>
+    <div class="muted">IP-derived locations. Stable candidate: ≥${model.stabilityCriteria.minimumObservations} observations across ≥${model.stabilityCriteria.minimumDistinctHours} distinct hours, spanning ≥${model.stabilityCriteria.minimumSpanHours}h, seen within the latest ${model.stabilityCriteria.maximumStaleHours}h.</div>
     <section class="cards" id="cards"></section>
     <section class="panel"><div id="map"></div></section>
     <section class="grid">
@@ -204,7 +263,7 @@ export function renderReportHtml(model: ReportModel): string {
         lat: points.map((point) => point.latitude),
         lon: points.map((point) => point.longitude),
         text: points.map((point) =>
-          \`\${point.endpoint}<br>\${point.city}, \${point.country}<br>AS\${point.asn ?? "?"} \${point.organization}<br>\${point.observations} observations · \${point.spanHours.toFixed(1)}h\`
+          \`\${point.endpoint}<br>\${point.city}, \${point.country}<br>AS\${point.asn ?? "?"} \${point.organization}<br>\${point.observations} observations · \${point.distinctHours} hours · \${point.spanHours.toFixed(1)}h span · \${point.staleHours.toFixed(1)}h stale\`
         ),
         hoverinfo: "text",
         marker: {
@@ -333,7 +392,12 @@ async function runReport(options: ReportOptions): Promise<void> {
     );
   }
 
-  const model = buildReportModel(observations, summaries, geos);
+  const model = buildReportModel(
+    observations,
+    summaries,
+    geos,
+    options.stabilityCriteria,
+  );
   await writeFile(options.outputPath, renderReportHtml(model), "utf8");
   console.log(
     `Wrote ${options.outputPath}: ${model.totals.locatedEndpoints}/${model.totals.endpoints} endpoints located`,
@@ -410,6 +474,29 @@ function aggregateTimeline(
       observations: bucket.observations,
       endpoints: bucket.endpoints.size,
     }));
+}
+
+function groupObservationsByEndpoint(
+  observations: NodeObservation[],
+): Map<string, NodeObservation[]> {
+  const groups = new Map<string, NodeObservation[]>();
+  for (const observation of observations) {
+    const endpoint = `${observation.host}:${observation.port}`;
+    const group = groups.get(endpoint) ?? [];
+    group.push(observation);
+    groups.set(endpoint, group);
+  }
+  return groups;
+}
+
+function observationHours(observations: NodeObservation[]): Set<string> {
+  return new Set(
+    observations.map((observation) => {
+      const date = new Date(observation.timestamp);
+      date.setUTCMinutes(0, 0, 0);
+      return date.toISOString();
+    }),
+  );
 }
 
 async function fetchGeoRecord(host: string): Promise<GeoRecord | null> {
@@ -520,7 +607,33 @@ function parseOptions(argv: string[]): ReportOptions {
     cachePath: path.resolve(
       values.get("--geo-cache") ?? path.join(inputDir, "geo-cache.json"),
     ),
+    stabilityCriteria: {
+      minimumSpanHours: positiveNumber(
+        values.get("--stable-min-hours"),
+        DEFAULT_STABILITY_CRITERIA.minimumSpanHours,
+      ),
+      minimumObservations: positiveNumber(
+        values.get("--stable-min-observations"),
+        DEFAULT_STABILITY_CRITERIA.minimumObservations,
+      ),
+      minimumDistinctHours: positiveNumber(
+        values.get("--stable-min-buckets"),
+        DEFAULT_STABILITY_CRITERIA.minimumDistinctHours,
+      ),
+      maximumStaleHours: positiveNumber(
+        values.get("--stable-max-stale-hours"),
+        DEFAULT_STABILITY_CRITERIA.maximumStaleHours,
+      ),
+    },
   };
+}
+
+function positiveNumber(value: string | undefined, fallback: number): number {
+  const number = value === undefined ? fallback : Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    throw new Error(`Expected a number greater than zero, received: ${value}`);
+  }
+  return number;
 }
 
 function delay(milliseconds: number): Promise<void> {

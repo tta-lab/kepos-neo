@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  candidateNodes,
   isCnIpv4,
   parseCnIpv4Ranges,
   summarizeObservations,
@@ -71,42 +70,4 @@ test("summarizes observations by stable IP and UDP port", () => {
       sources: ["lookup"],
     },
   ]);
-});
-
-test("selects only repeatedly observed CN endpoints with enough time span", () => {
-  const ranges = parseCnIpv4Ranges(delegatedApnic);
-  const summaries = summarizeObservations([
-    {
-      timestamp: "2026-07-18T00:00:00.000Z",
-      host: "1.0.1.42",
-      port: 49_737,
-      source: "lookup",
-    },
-    {
-      timestamp: "2026-07-19T00:00:00.000Z",
-      host: "1.0.1.42",
-      port: 49_737,
-      source: "lookup",
-    },
-    {
-      timestamp: "2026-07-18T00:00:00.000Z",
-      host: "1.0.0.42",
-      port: 49_737,
-      source: "lookup",
-    },
-    {
-      timestamp: "2026-07-19T00:00:00.000Z",
-      host: "1.0.0.42",
-      port: 49_737,
-      source: "lookup",
-    },
-  ]);
-
-  assert.deepEqual(
-    candidateNodes(summaries, ranges, {
-      minimumObservations: 2,
-      minimumSpanMs: 24 * 60 * 60 * 1_000,
-    }).map(({ endpoint }) => endpoint),
-    ["1.0.1.42:49737"],
-  );
 });
