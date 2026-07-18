@@ -192,6 +192,11 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     assert.ok(subscriberConnected?.outerId);
     assert.equal(subscriberConnected.route, "auto");
     assert.equal(subscriberChannel?.outerId, subscriberConnected.outerId);
+    assert.equal(
+      typeof (subscriberChannel?.transport as { udx?: { rtt?: unknown } })
+        ?.udx?.rtt,
+      "number",
+    );
     assert.ok(
       publisherEvents.some(({ event }) => event === "outer.accepted"),
     );

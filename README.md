@@ -72,8 +72,11 @@ status remains on stderr so stdout stays valid NDJSON.
 Use `outerId` to correlate connection and channel events. Several
 `channel.open` events with one `outerId` are several TCP services sharing one
 persistent connection, not several DHT handshakes. Transport snapshots are
-sanitized diagnostics whose shape may change; do not treat them as a stable
-API or copy state files into logs.
+captured again on `channel.open-ok`, `channel.open-error`, and `channel.close`.
+Their `udx` fields include live RTT, congestion window, in-flight packet,
+timeout, retransmit, recovery, and byte/packet counters. These are sanitized
+diagnostics whose shape may change; do not treat them as a stable API or copy
+state files into logs.
 
 The command prints the local Home URL. The local listeners remain stable while
 the subscriber reconnects in the background after a publisher restart. Active

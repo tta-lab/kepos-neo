@@ -9,6 +9,10 @@ import {
   type Observation,
 } from "../src/mux/observability.js";
 import {
+  dhtStreamSnapshot,
+  type DhtStream,
+} from "../src/mux/hyperdht.js";
+import {
   createMuxPublisher,
   createMuxSubscriber,
 } from "../src/mux/transport.js";
@@ -138,11 +142,57 @@ test("observation fields cannot replace stable context", () => {
   assert.equal(event.role, "subscriber");
 });
 
+test("DHT stream snapshots include live UDX congestion and retransmit state", () => {
+  const stream = {
+    connected: true,
+    rawStream: {
+      rtt: 83,
+      cwnd: 24,
+      inflight: 7,
+      rtoCount: 2,
+      retransmits: 5,
+      fastRecoveries: 3,
+      bbrState: 1,
+      bbrBandwidth: 4_200_000,
+      bytesTransmitted: 12_000,
+      packetsTransmitted: 120,
+      bytesReceived: 34_000,
+      packetsReceived: 340,
+      socket: {
+        packetsDroppedByKernel: 4,
+      },
+    },
+    toJSON: () => ({ connected: true }),
+  } as unknown as DhtStream;
+
+  assert.deepEqual(dhtStreamSnapshot(stream), {
+    connected: true,
+    udx: {
+      rtt: 83,
+      cwnd: 24,
+      inflight: 7,
+      rtoCount: 2,
+      retransmits: 5,
+      fastRecoveries: 3,
+      bbrState: 1,
+      bbrBandwidth: 4_200_000,
+      bytesTransmitted: 12_000,
+      packetsTransmitted: 120,
+      bytesReceived: 34_000,
+      packetsReceived: 340,
+      packetsDroppedByKernel: 4,
+    },
+  });
+});
+
 test("mux observations identify channel open, first bytes, totals, and close source", async () => {
   const [subscriberOuter, publisherOuter] = framedPair();
   const subscriberEvents: Observation[] = [];
   const publisherEvents: Observation[] = [];
   let now = 2_000;
+  let subscriberTransport = {
+    udx: { rtt: 40, retransmits: 1, rtoCount: 0 },
+  };
   const publisher = createMuxPublisher(publisherOuter, {
     outerId: "outer-pub-1",
     now: () => now,
@@ -153,6 +203,7 @@ test("mux observations identify channel open, first bytes, totals, and close sou
     outerId: "outer-sub-1",
     now: () => now,
     observe: (event) => subscriberEvents.push(event),
+    transportSnapshot: () => subscriberTransport,
   });
 
   const stream = await subscriber.open("ssh");
@@ -162,6 +213,9 @@ test("mux observations identify channel open, first bytes, totals, and close sou
   assert.equal(response.toString(), "ssh:hello");
 
   now = 2_300;
+  subscriberTransport = {
+    udx: { rtt: 870, retransmits: 6, rtoCount: 2 },
+  };
   stream.destroy();
   await once(stream, "close");
   await waitFor(
@@ -178,6 +232,9 @@ test("mux observations identify channel open, first bytes, totals, and close sou
   assert.equal(subscriberOpen?.serviceId, "ssh");
   assert.equal(subscriberOpenOk?.channelId, subscriberOpen?.channelId);
   assert.equal(subscriberOpenOk?.outerId, "outer-sub-1");
+  assert.deepEqual(subscriberOpenOk?.transport, {
+    udx: { rtt: 40, retransmits: 1, rtoCount: 0 },
+  });
 
   assert.deepEqual(
     subscriberEvents
@@ -198,6 +255,9 @@ test("mux observations identify channel open, first bytes, totals, and close sou
   assert.equal(subscriberClose?.durationMs, 300);
   assert.equal(subscriberClose?.subscriberToPublisherFirstByteMs, 100);
   assert.equal(subscriberClose?.publisherToSubscriberFirstByteMs, 100);
+  assert.deepEqual(subscriberClose?.transport, {
+    udx: { rtt: 870, retransmits: 6, rtoCount: 2 },
+  });
 
   const publisherOpen = publisherEvents.find(
     ({ event }) => event === "channel.open",

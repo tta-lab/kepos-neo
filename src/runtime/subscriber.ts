@@ -303,6 +303,7 @@ export function createPublisherConnection(options: {
             outerId,
             now: options.now,
             observe: options.observe,
+            transportSnapshot: () => dhtStreamSnapshot(outer),
           }),
           observe,
         ),

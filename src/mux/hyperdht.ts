@@ -18,6 +18,7 @@ export interface DhtKeyPair {
 
 export interface DhtStream extends Duplex {
   connected?: boolean;
+  rawStream?: unknown;
   remotePublicKey: Buffer;
   setKeepAlive?: (intervalMs: number) => void;
   toJSON?: () => unknown;
@@ -75,5 +76,68 @@ export function keyPairFromSecretKey(secretKey: string): DhtKeyPair {
 }
 
 export function dhtStreamSnapshot(stream: DhtStream): unknown {
-  return sanitizeObservation(stream.toJSON?.() ?? null);
+  const snapshot = stream.toJSON?.();
+  const base =
+    snapshot !== null && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? snapshot
+      : {};
+  const udx = udxStreamSnapshot(stream.rawStream);
+
+  return sanitizeObservation({
+    ...base,
+    ...(udx ? { udx } : {}),
+  });
+}
+
+function udxStreamSnapshot(rawStream: unknown): Record<string, number> | undefined {
+  if (rawStream === null || typeof rawStream !== "object") return undefined;
+
+  const raw = rawStream as Record<string, unknown>;
+  const socket =
+    raw.socket !== null && typeof raw.socket === "object"
+      ? (raw.socket as Record<string, unknown>)
+      : undefined;
+  const snapshot = {
+    ...numericFields(raw, [
+      "rtt",
+      "cwnd",
+      "inflight",
+      "rtoCount",
+      "retransmits",
+      "fastRecoveries",
+      "bbrState",
+      "bbrBandwidth",
+      "bytesTransmitted",
+      "packetsTransmitted",
+      "bytesReceived",
+      "packetsReceived",
+    ]),
+    ...(socket
+      ? numericFields(socket, ["packetsDroppedByKernel"])
+      : {}),
+  };
+
+  return Object.keys(snapshot).length > 0 ? snapshot : undefined;
+}
+
+function numericFields(
+  source: Record<string, unknown>,
+  keys: string[],
+): Record<string, number> {
+  const fields: Record<string, number> = {};
+  for (const key of keys) {
+    const value = readProperty(source, key);
+    if (typeof value === "number" && Number.isFinite(value)) {
+      fields[key] = value;
+    }
+  }
+  return fields;
+}
+
+function readProperty(source: Record<string, unknown>, key: string): unknown {
+  try {
+    return source[key];
+  } catch {
+    return undefined;
+  }
 }

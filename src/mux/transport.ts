@@ -83,12 +83,14 @@ export interface MuxPublisherOptions {
   now?: () => number;
   observe?: Observe;
   outerId?: string;
+  transportSnapshot?: () => unknown;
 }
 
 export interface MuxSubscriberOptions {
   now?: () => number;
   observe?: Observe;
   outerId?: string;
+  transportSnapshot?: () => unknown;
 }
 
 export interface RunningMuxPublisher {
@@ -137,6 +139,7 @@ class MuxTunnel extends Duplex {
       measure: boolean;
       now: () => number;
       outgoingDirection: ObservationDirection;
+      transportSnapshot?: () => unknown;
     },
   ) {
     super({ allowHalfOpen: true });
@@ -295,6 +298,7 @@ class MuxTunnel extends Duplex {
       ...(error ? { error: error.message } : {}),
       durationMs: this.options.now() - this.openedAt,
       ...this.transferFields(),
+      ...transportFields(this.options.transportSnapshot),
     });
     this.channel?.close();
     callback(error);
@@ -378,12 +382,16 @@ export function createMuxSubscriber(
         emit,
         options.observe !== undefined,
         now,
+        options.transportSnapshot,
         (status) => {
           if (status === "") {
             tunnel.stream.accept();
-            emit("channel.open-ok");
+            emit("channel.open-ok", transportFields(options.transportSnapshot));
           } else {
-            emit("channel.open-error", { error: status });
+            emit("channel.open-error", {
+              error: status,
+              ...transportFields(options.transportSnapshot),
+            });
             tunnel.stream.reject(status);
           }
         },
@@ -428,6 +436,7 @@ export function createMuxPublisher(
       emit,
       options.observe !== undefined,
       now,
+      options.transportSnapshot,
       () => undefined,
       async (openedServiceId) => {
         serviceId = openedServiceId;
@@ -436,14 +445,17 @@ export function createMuxPublisher(
           const target = await options.connect(openedServiceId);
           tunnel.stream.accept();
           tunnel.messages.status.send("");
-          emit("channel.open-ok");
+          emit("channel.open-ok", transportFields(options.transportSnapshot));
           bridge(tunnel.stream, target);
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
           tunnel.stream.accept();
           tunnel.messages.status.send(message);
-          emit("channel.open-error", { error: message });
+          emit("channel.open-error", {
+            error: message,
+            ...transportFields(options.transportSnapshot),
+          });
           queueMicrotask(() => tunnel.channel.close());
         }
       },
@@ -466,6 +478,7 @@ function createTunnel(
   emit: EmitObservation,
   measure: boolean,
   now: () => number,
+  transportSnapshot: (() => unknown) | undefined,
   onStatus: (status: string) => void,
   onOpen?: (serviceId: string) => void | Promise<void>,
 ): { channel: MuxChannel; messages: TunnelMessages; stream: MuxTunnel } {
@@ -481,6 +494,7 @@ function createTunnel(
       role === "subscriber"
         ? "subscriber-to-publisher"
         : "publisher-to-subscriber",
+    transportSnapshot,
   });
   const channel = mux.createChannel({
     protocol,
@@ -522,6 +536,18 @@ function createTunnel(
   };
   stream.attach(channel, messages);
   return { channel, messages, stream };
+}
+
+function transportFields(
+  snapshot: (() => unknown) | undefined,
+): ObservationFields {
+  if (!snapshot) return {};
+  try {
+    const transport = snapshot();
+    return transport === undefined ? {} : { transport };
+  } catch {
+    return {};
+  }
 }
 
 function bridge(tunnel: MuxTunnel, target: Duplex): void {

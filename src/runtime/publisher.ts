@@ -114,6 +114,7 @@ export async function startPublisher(
         outerId,
         now,
         observe: options.observe,
+        transportSnapshot: () => dhtStreamSnapshot(stream),
         connect: async (serviceId) => {
           const targetPort = targets.get(serviceId);
           if (targetPort === undefined) {
