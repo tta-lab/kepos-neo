@@ -1,26 +1,35 @@
-# HyperDHT China node crawl
+# HyperDHT graph snapshots
 
-This crawl checks whether the public HyperDHT contains stable nodes with
-mainland China IPv4 addresses that could be tested as bootstrap candidates.
+This tool explores adjacency in the public HyperDHT and saves a bounded graph
+snapshot. It checks whether the network contains stable nodes with mainland
+China IPv4 addresses that may be worth testing as bootstrap candidates.
 HyperDHT does not mark a node as a bootstrap node: a candidate must still be
 tested for stable public UDP reachability and long-term uptime.
 
-Run it for 72 hours so the sample covers daily churn and both workday and
-weekend traffic:
+Run one snapshot:
 
 ```sh
 npm run crawl:dht -- \
-  --duration-hours 72 \
-  --interval-seconds 60 \
-  --output ~/.local/state/kepos-neo/dht-crawl
+  --targets 32 \
+  --frontier 64 \
+  --output ~/.local/state/kepos-neo/dht-graph
 ```
 
-The crawler performs one random DHT lookup per minute. It writes:
+The crawler starts with random `findNode` queries, records every responding
+node and advertised neighbor, then validates a bounded frontier ranked by how
+many independent nodes advertised it. It writes each run under
+`snapshots/<timestamp>/`:
 
-- `observations.jsonl`: crash-safe endpoint observations;
-- `summary.json`: factual endpoint counts and all mainland China endpoints;
-- `run.json`: process ID and planned stop time;
-- `errors.jsonl`: lookup failures, when present.
+- `nodes.jsonl`: verified responders and advertised nodes;
+- `edges.jsonl`: directed adjacency observations;
+- `observations.jsonl`: verified endpoint observations used by the report;
+- `queries.jsonl`: query targets, starting nodes, reply counts, and errors;
+- `summary.json`: graph size and mainland China endpoint counts;
+- `run.json`: the exact limits and timestamps for the run.
+
+This is a one-shot command, not a daemon. Run it again about every 12 hours to
+measure churn and stability without sending constant traffic. Each snapshot is
+kept separate, so later analysis can compare the graph over time.
 
 China address classification comes from the APNIC delegated address list
 cached inside the output directory. An APNIC CN allocation is a useful first
@@ -35,7 +44,7 @@ Generate the geographic report after or during a crawl:
 
 ```sh
 npm run report:dht -- \
-  --input ~/.local/state/kepos-neo/dht-crawl \
+  --input ~/.local/state/kepos-neo/dht-graph \
   --enrich \
   --stable-min-hours 24 \
   --stable-min-observations 6 \
@@ -45,8 +54,9 @@ npm run report:dht -- \
 
 `--enrich` looks up missing IP locations one at a time and caches them in
 `geo-cache.json`. Later report runs reuse the cache and can omit the flag. The
-generated `report.html` contains the collected data and uses Plotly from its
-CDN to render the world map, country and ASN rankings, hourly reach, and node
-stability. Stability thresholds are report-only parameters: they never alter
-or filter `observations.jsonl`, so the same crawl can be reprocessed with
-different definitions.
+generated `report.html` merges all snapshots and uses Plotly from its CDN to
+render the world map, country and ASN rankings, hourly reach, and node
+stability. A stability bucket is one snapshot, not one reply or wall-clock
+hour. Stability thresholds are report-only parameters: they never alter or
+filter raw snapshot data, so the same crawl can be reprocessed with different
+definitions.

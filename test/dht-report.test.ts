@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -6,7 +9,9 @@ import {
   enrichHosts,
   formatCountryLabel,
   isStableCandidate,
+  observationBucket,
   parseObservationJsonl,
+  readInputObservations,
   renderReportHtml,
   type GeoRecord,
 } from "../src/tools/dht-report.js";
@@ -213,7 +218,7 @@ test("stable candidates use post-processing span, bucket, count, and recency thr
       {
         minimumSpanHours: 24,
         minimumObservations: 3,
-        minimumDistinctHours: 3,
+        minimumDistinctBuckets: 3,
         maximumStaleHours: 2,
       },
     ),
@@ -227,10 +232,50 @@ test("stable candidates use post-processing span, bucket, count, and recency thr
       {
         minimumSpanHours: 24,
         minimumObservations: 3,
-        minimumDistinctHours: 3,
+        minimumDistinctBuckets: 3,
         maximumStaleHours: 2,
       },
     ),
     false,
   );
+});
+
+test("snapshot IDs replace clock hours as cross-run stability buckets", () => {
+  assert.equal(
+    observationBucket({
+      timestamp: "2026-07-18T00:05:00.000Z",
+      snapshot: "snapshot-a",
+      host: "1.0.1.42",
+      port: 49_737,
+      source: "find-node",
+    }),
+    "snapshot-a",
+  );
+});
+
+test("reads observations from all graph snapshots in timestamp order", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-dht-report-"));
+  try {
+    const first = path.join(root, "snapshots", "2026-07-18T00-00-00.000Z");
+    const second = path.join(root, "snapshots", "2026-07-18T12-00-00.000Z");
+    await mkdir(first, { recursive: true });
+    await mkdir(second, { recursive: true });
+    await writeFile(
+      path.join(first, "observations.jsonl"),
+      `${JSON.stringify({ ...observations[0], snapshot: "first" })}\n`,
+    );
+    await writeFile(
+      path.join(second, "observations.jsonl"),
+      `${JSON.stringify({ ...observations[1], snapshot: "second" })}\n`,
+    );
+
+    const loaded = await readInputObservations(root);
+
+    assert.deepEqual(
+      loaded.map(({ snapshot }) => snapshot),
+      ["first", "second"],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

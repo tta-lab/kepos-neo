@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { isIPv4 } from "node:net";
 import os from "node:os";
@@ -11,8 +11,6 @@ const HyperDHT = require("hyperdht") as HyperDhtConstructor;
 
 const APNIC_URL =
   "https://ftp.apnic.net/stats/apnic/delegated-apnic-latest";
-const DEFAULT_DURATION_HOURS = 72;
-const DEFAULT_INTERVAL_SECONDS = 60;
 
 export interface Ipv4Range {
   start: number;
@@ -23,7 +21,8 @@ export interface NodeObservation {
   timestamp: string;
   host: string;
   port: number;
-  source: "lookup" | "routing";
+  source: "lookup" | "routing" | "find-node";
+  snapshot?: string;
 }
 
 export interface NodeSummary {
@@ -36,17 +35,40 @@ export interface NodeSummary {
   sources: Array<NodeObservation["source"]>;
 }
 
-interface LookupReply {
-  from?: {
-    host?: unknown;
-    port?: unknown;
-  };
+export interface GraphReply {
+  from: { host: string; port: number };
+  rtt: number;
+  closerNodes: Array<{ host: string; port: number }> | null;
+}
+
+export interface GraphNode {
+  endpoint: string;
+  host: string;
+  port: number;
+  verified: boolean;
+  directResponses: number;
+  advertisedBy: number;
+  minimumRttMs: number | null;
+  maximumRttMs: number | null;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  observations: number;
+}
+
+export interface GraphSnapshot {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
 }
 
 interface HyperDhtNode {
   fullyBootstrapped(): Promise<void>;
-  lookup(target: Buffer): AsyncIterable<LookupReply>;
-  toArray(): Array<{ host: string; port: number }>;
+  findNode(
+    target: Buffer,
+    options?: { nodes?: Array<{ host: string; port: number }> },
+  ): AsyncIterable<GraphReply>;
   destroy(options?: { force?: boolean }): Promise<void>;
 }
 
@@ -55,9 +77,9 @@ interface HyperDhtConstructor {
 }
 
 interface CrawlerOptions {
-  durationHours: number;
-  intervalSeconds: number;
-  outputDir: string;
+  targets: number;
+  frontier: number;
+  outputRoot: string;
 }
 
 export function parseCnIpv4Ranges(input: string): Ipv4Range[] {
@@ -147,111 +169,240 @@ export function summarizeObservations(
   );
 }
 
-async function runCrawler(options: CrawlerOptions): Promise<void> {
-  await mkdir(options.outputDir, { recursive: true });
-  const observationsPath = path.join(options.outputDir, "observations.jsonl");
-  const errorsPath = path.join(options.outputDir, "errors.jsonl");
-  const summaryPath = path.join(options.outputDir, "summary.json");
-  const ranges = parseCnIpv4Ranges(await loadApnicData(options.outputDir));
-  const observations = await readObservations(observationsPath);
-  const summaries = new Map(
-    summarizeObservations(observations).map((summary) => [
-      summary.endpoint,
-      summary,
-    ]),
-  );
-  const startedAt = new Date();
-  const stopAt = new Date(
-    startedAt.getTime() + options.durationHours * 60 * 60 * 1_000,
-  );
-  const dht = new HyperDHT();
-  let stopping = false;
+export function aggregateGraphReplies(replies: GraphReply[]): GraphSnapshot {
+  const nodes = new Map<string, GraphNode & { referrers: Set<string> }>();
+  const edges = new Map<string, GraphEdge>();
 
-  const stop = (): void => {
-    stopping = true;
+  for (const reply of replies) {
+    const source = endpoint(reply.from);
+    const sourceNode = graphNode(nodes, reply.from);
+    sourceNode.verified = true;
+    sourceNode.directResponses += 1;
+    sourceNode.minimumRttMs =
+      sourceNode.minimumRttMs === null
+        ? reply.rtt
+        : Math.min(sourceNode.minimumRttMs, reply.rtt);
+    sourceNode.maximumRttMs =
+      sourceNode.maximumRttMs === null
+        ? reply.rtt
+        : Math.max(sourceNode.maximumRttMs, reply.rtt);
+
+    for (const neighbor of reply.closerNodes ?? []) {
+      const target = endpoint(neighbor);
+      if (target === source) {
+        continue;
+      }
+      const targetNode = graphNode(nodes, neighbor);
+      targetNode.referrers.add(source);
+      const edgeKey = `${source}>${target}`;
+      const edge = edges.get(edgeKey) ?? {
+        source,
+        target,
+        observations: 0,
+      };
+      edge.observations += 1;
+      edges.set(edgeKey, edge);
+    }
+  }
+
+  return {
+    nodes: [...nodes.values()]
+      .map(({ referrers, ...node }) => ({
+        ...node,
+        advertisedBy: referrers.size,
+      }))
+      .sort((left, right) => left.endpoint.localeCompare(right.endpoint)),
+    edges: [...edges.values()].sort(
+      (left, right) =>
+        left.source.localeCompare(right.source) ||
+        left.target.localeCompare(right.target),
+    ),
   };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+}
 
-  await writeJson(path.join(options.outputDir, "run.json"), {
+export function rankFrontier(
+  nodes: GraphNode[],
+  limit: number,
+): GraphNode[] {
+  return nodes
+    .filter(({ verified }) => !verified)
+    .sort(
+      (left, right) =>
+        right.advertisedBy - left.advertisedBy ||
+        left.endpoint.localeCompare(right.endpoint),
+    )
+    .slice(0, limit);
+}
+
+function graphNode(
+  nodes: Map<string, GraphNode & { referrers: Set<string> }>,
+  address: { host: string; port: number },
+): GraphNode & { referrers: Set<string> } {
+  const key = endpoint(address);
+  const existing = nodes.get(key);
+  if (existing) {
+    return existing;
+  }
+  const node = {
+    endpoint: key,
+    host: address.host,
+    port: address.port,
+    verified: false,
+    directResponses: 0,
+    advertisedBy: 0,
+    minimumRttMs: null,
+    maximumRttMs: null,
+    referrers: new Set<string>(),
+  };
+  nodes.set(key, node);
+  return node;
+}
+
+function endpoint(address: { host: string; port: number }): string {
+  return `${address.host}:${address.port}`;
+}
+
+async function runCrawler(options: CrawlerOptions): Promise<void> {
+  const startedAt = new Date();
+  const snapshot = startedAt.toISOString().replaceAll(":", "-");
+  const snapshotDir = path.join(options.outputRoot, "snapshots", snapshot);
+  await mkdir(snapshotDir, { recursive: true });
+  const ranges = parseCnIpv4Ranges(await loadApnicData(options.outputRoot));
+  const dht = new HyperDHT();
+  const replies: GraphReply[] = [];
+  const queries: Array<Record<string, unknown>> = [];
+
+  await writeJson(path.join(snapshotDir, "run.json"), {
+    snapshot,
     startedAt: startedAt.toISOString(),
-    stopAt: stopAt.toISOString(),
-    durationHours: options.durationHours,
-    intervalSeconds: options.intervalSeconds,
+    targets: options.targets,
+    frontier: options.frontier,
     pid: process.pid,
   });
 
-  console.log(`Bootstrapping HyperDHT; output=${options.outputDir}`);
+  console.log(`Bootstrapping HyperDHT; snapshot=${snapshot}`);
   await dht.fullyBootstrapped();
-  console.log(`Sampling until ${stopAt.toISOString()}`);
 
   try {
-    while (!stopping && Date.now() < stopAt.getTime()) {
-      const timestamp = new Date().toISOString();
-      const batch: NodeObservation[] = [];
-
-      try {
-        for await (const reply of dht.lookup(randomBytes(32))) {
-          const endpoint = normalizeEndpoint(reply.from);
-          if (endpoint) {
-            batch.push({ timestamp, ...endpoint, source: "lookup" });
-          }
-        }
-      } catch (error) {
-        await appendJsonLine(errorsPath, {
-          timestamp,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-
-      for (const node of dht.toArray()) {
-        const endpoint = normalizeEndpoint(node);
-        if (endpoint) {
-          batch.push({ timestamp, ...endpoint, source: "routing" });
-        }
-      }
-
-      const uniqueBatch = uniqueObservations(batch);
-      observations.push(...uniqueBatch);
-      updateSummaries(summaries, uniqueBatch);
-      await appendJsonLines(observationsPath, uniqueBatch);
-      await writeSummary(
-        summaryPath,
-        observations.length,
-        [...summaries.values()],
-        ranges,
-        startedAt,
-        stopAt,
+    for (let index = 0; index < options.targets; index += 1) {
+      await collectQuery(
+        dht,
+        randomBytes(32),
+        "seed",
+        null,
+        replies,
+        queries,
       );
-
-      const cnCount = new Set(
-        [...summaries.values()]
-          .filter((summary) => isCnIpv4(summary.host, ranges))
-          .map((summary) => summary.endpoint),
-      ).size;
-      console.log(
-        `${timestamp} sampled=${uniqueBatch.length} total=${observations.length} cnEndpoints=${cnCount}`,
-      );
-
-      await delay(options.intervalSeconds * 1_000);
     }
-  } finally {
-    await writeSummary(
-      summaryPath,
-      observations.length,
-      [...summaries.values()],
-      ranges,
-      startedAt,
-      stopAt,
+
+    const seedGraph = aggregateGraphReplies(replies);
+    const frontier = rankFrontier(seedGraph.nodes, options.frontier);
+    for (const node of frontier) {
+      await collectQuery(
+        dht,
+        randomBytes(32),
+        "frontier",
+        { host: node.host, port: node.port },
+        replies,
+        queries,
+      );
+    }
+
+    const graph = aggregateGraphReplies(replies);
+    const observations: NodeObservation[] = replies.map((reply) => ({
+      timestamp: startedAt.toISOString(),
+      snapshot,
+      host: reply.from.host,
+      port: reply.from.port,
+      source: "find-node",
+    }));
+    const cnNodes = graph.nodes.filter((node) => isCnIpv4(node.host, ranges));
+    await writeJsonLines(path.join(snapshotDir, "nodes.jsonl"), graph.nodes);
+    await writeJsonLines(path.join(snapshotDir, "edges.jsonl"), graph.edges);
+    await writeJsonLines(
+      path.join(snapshotDir, "observations.jsonl"),
+      observations,
     );
+    await writeJsonLines(path.join(snapshotDir, "queries.jsonl"), queries);
+    await writeJson(path.join(snapshotDir, "summary.json"), {
+      snapshot,
+      completedAt: new Date().toISOString(),
+      queries: queries.length,
+      replies: replies.length,
+      nodes: graph.nodes.length,
+      verifiedNodes: graph.nodes.filter(({ verified }) => verified).length,
+      advertisedNodes: graph.nodes.filter(({ verified }) => !verified).length,
+      edges: graph.edges.length,
+      cnNodes: cnNodes.length,
+      cnVerifiedNodes: cnNodes.filter(({ verified }) => verified).length,
+    });
+    console.log(
+      `Completed ${snapshot}: nodes=${graph.nodes.length} verified=${graph.nodes.filter(({ verified }) => verified).length} edges=${graph.edges.length}`,
+    );
+  } finally {
     await dht.destroy({ force: true });
-    process.removeListener("SIGINT", stop);
-    process.removeListener("SIGTERM", stop);
+  }
+}
+
+async function collectQuery(
+  dht: HyperDhtNode,
+  target: Buffer,
+  phase: "seed" | "frontier",
+  startNode: { host: string; port: number } | null,
+  replies: GraphReply[],
+  queries: Array<Record<string, unknown>>,
+): Promise<void> {
+  const startedAt = new Date().toISOString();
+  let responseCount = 0;
+  let advertisedCount = 0;
+  try {
+    const query = dht.findNode(
+      target,
+      startNode ? { nodes: [startNode] } : undefined,
+    );
+    for await (const raw of query) {
+      const from = normalizeEndpoint(raw.from);
+      if (!from) {
+        continue;
+      }
+      const closerNodes = (raw.closerNodes ?? [])
+        .map(normalizeEndpoint)
+        .filter(
+          (node): node is { host: string; port: number } => node !== null,
+        );
+      replies.push({
+        from,
+        rtt: raw.rtt,
+        closerNodes,
+      });
+      responseCount += 1;
+      advertisedCount += closerNodes.length;
+    }
+    queries.push({
+      phase,
+      target: target.toString("hex"),
+      startNode,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      responses: responseCount,
+      advertised: advertisedCount,
+    });
+  } catch (error) {
+    queries.push({
+      phase,
+      target: target.toString("hex"),
+      startNode,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      responses: responseCount,
+      advertised: advertisedCount,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
 function normalizeEndpoint(
-  value: LookupReply["from"],
+  value: { host?: unknown; port?: unknown } | null | undefined,
 ): { host: string; port: number } | null {
   if (!value || typeof value.host !== "string") {
     return null;
@@ -303,39 +454,6 @@ function ipv4ToNumber(host: string): number | null {
     .reduce((value, octet) => value * 256 + octet, 0);
 }
 
-function uniqueObservations(
-  observations: NodeObservation[],
-): NodeObservation[] {
-  const unique = new Map<string, NodeObservation>();
-  for (const observation of observations) {
-    unique.set(
-      `${observation.source}:${observation.host}:${observation.port}`,
-      observation,
-    );
-  }
-  return [...unique.values()];
-}
-
-function updateSummaries(
-  summaries: Map<string, NodeSummary>,
-  observations: NodeObservation[],
-): void {
-  for (const update of summarizeObservations(observations)) {
-    const current = summaries.get(update.endpoint);
-    if (!current) {
-      summaries.set(update.endpoint, update);
-      continue;
-    }
-
-    current.firstSeen =
-      update.firstSeen < current.firstSeen ? update.firstSeen : current.firstSeen;
-    current.lastSeen =
-      update.lastSeen > current.lastSeen ? update.lastSeen : current.lastSeen;
-    current.observations += update.observations;
-    current.sources = [...new Set([...current.sources, ...update.sources])].sort();
-  }
-}
-
 async function loadApnicData(outputDir: string): Promise<string> {
   const cachePath = path.join(outputDir, "delegated-apnic-latest");
   try {
@@ -351,78 +469,23 @@ async function loadApnicData(outputDir: string): Promise<string> {
   }
 }
 
-async function readObservations(
-  observationsPath: string,
-): Promise<NodeObservation[]> {
-  let input: string;
-  try {
-    input = await readFile(observationsPath, "utf8");
-  } catch {
-    return [];
-  }
-
-  const observations: NodeObservation[] = [];
-  for (const line of input.split("\n")) {
-    if (!line) {
-      continue;
-    }
-    observations.push(JSON.parse(line) as NodeObservation);
-  }
-  return observations;
-}
-
-async function appendJsonLines(
+async function writeJsonLines(
   filePath: string,
   values: unknown[],
 ): Promise<void> {
-  if (values.length === 0) {
-    return;
-  }
-  await appendFile(
+  await writeFile(
     filePath,
-    `${values.map((value) => JSON.stringify(value)).join("\n")}\n`,
+    values.length === 0
+      ? ""
+      : `${values.map((value) => JSON.stringify(value)).join("\n")}\n`,
     "utf8",
   );
-}
-
-async function appendJsonLine(
-  filePath: string,
-  value: unknown,
-): Promise<void> {
-  await appendJsonLines(filePath, [value]);
-}
-
-async function writeSummary(
-  summaryPath: string,
-  observationCount: number,
-  summaries: NodeSummary[],
-  ranges: Ipv4Range[],
-  startedAt: Date,
-  stopAt: Date,
-): Promise<void> {
-  const nodes = summaries.sort((left, right) =>
-    left.endpoint.localeCompare(right.endpoint),
-  );
-  const cnNodes = nodes.filter((node) => isCnIpv4(node.host, ranges));
-  await writeJson(summaryPath, {
-    updatedAt: new Date().toISOString(),
-    startedAt: startedAt.toISOString(),
-    stopAt: stopAt.toISOString(),
-    observationCount,
-    endpointCount: nodes.length,
-    cnEndpointCount: cnNodes.length,
-    cnNodes,
-  });
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   const temporaryPath = `${filePath}.${process.pid}.tmp`;
   await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(temporaryPath, filePath);
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function parseOptions(argv: string[]): CrawlerOptions {
@@ -436,23 +499,19 @@ function parseOptions(argv: string[]): CrawlerOptions {
     values.set(name, value);
   }
 
-  const durationHours = Number(
-    values.get("--duration-hours") ?? DEFAULT_DURATION_HOURS,
-  );
-  const intervalSeconds = Number(
-    values.get("--interval-seconds") ?? DEFAULT_INTERVAL_SECONDS,
-  );
-  const outputDir = path.resolve(
+  const targets = Number(values.get("--targets") ?? 32);
+  const frontier = Number(values.get("--frontier") ?? 64);
+  const outputRoot = path.resolve(
     values.get("--output") ??
-      path.join(os.homedir(), ".local", "state", "kepos-neo", "dht-crawl"),
+      path.join(os.homedir(), ".local", "state", "kepos-neo", "dht-graph"),
   );
-  if (!Number.isFinite(durationHours) || durationHours <= 0) {
-    throw new Error("--duration-hours must be greater than zero");
+  if (!Number.isInteger(targets) || targets <= 0) {
+    throw new Error("--targets must be a positive integer");
   }
-  if (!Number.isFinite(intervalSeconds) || intervalSeconds < 1) {
-    throw new Error("--interval-seconds must be at least one");
+  if (!Number.isInteger(frontier) || frontier < 0) {
+    throw new Error("--frontier must be a non-negative integer");
   }
-  return { durationHours, intervalSeconds, outputDir };
+  return { targets, frontier, outputRoot };
 }
 
 const entrypoint = process.argv[1]

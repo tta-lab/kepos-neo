@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  aggregateGraphReplies,
   isCnIpv4,
   parseCnIpv4Ranges,
+  rankFrontier,
   summarizeObservations,
+  type GraphReply,
   type NodeObservation,
 } from "../src/tools/dht-crawler.js";
 
@@ -70,4 +73,85 @@ test("summarizes observations by stable IP and UDP port", () => {
       sources: ["lookup"],
     },
   ]);
+});
+
+test("aggregates verified responders and advertised adjacency edges", () => {
+  const replies: GraphReply[] = [
+    {
+      from: { host: "1.1.1.1", port: 1001 },
+      rtt: 40,
+      closerNodes: [
+        { host: "2.2.2.2", port: 2002 },
+        { host: "3.3.3.3", port: 3003 },
+      ],
+    },
+    {
+      from: { host: "4.4.4.4", port: 4004 },
+      rtt: 80,
+      closerNodes: [{ host: "2.2.2.2", port: 2002 }],
+    },
+  ];
+
+  const graph = aggregateGraphReplies(replies);
+
+  assert.deepEqual(
+    graph.nodes.map(({ endpoint, verified, advertisedBy }) => ({
+      endpoint,
+      verified,
+      advertisedBy,
+    })),
+    [
+      { endpoint: "1.1.1.1:1001", verified: true, advertisedBy: 0 },
+      { endpoint: "2.2.2.2:2002", verified: false, advertisedBy: 2 },
+      { endpoint: "3.3.3.3:3003", verified: false, advertisedBy: 1 },
+      { endpoint: "4.4.4.4:4004", verified: true, advertisedBy: 0 },
+    ],
+  );
+  assert.deepEqual(
+    graph.edges.map(({ source, target, observations }) => ({
+      source,
+      target,
+      observations,
+    })),
+    [
+      {
+        source: "1.1.1.1:1001",
+        target: "2.2.2.2:2002",
+        observations: 1,
+      },
+      {
+        source: "1.1.1.1:1001",
+        target: "3.3.3.3:3003",
+        observations: 1,
+      },
+      {
+        source: "4.4.4.4:4004",
+        target: "2.2.2.2:2002",
+        observations: 1,
+      },
+    ],
+  );
+});
+
+test("frontier prefers unverified nodes advertised by independent responders", () => {
+  const graph = aggregateGraphReplies([
+    {
+      from: { host: "1.1.1.1", port: 1001 },
+      rtt: 40,
+      closerNodes: [
+        { host: "2.2.2.2", port: 2002 },
+        { host: "3.3.3.3", port: 3003 },
+      ],
+    },
+    {
+      from: { host: "4.4.4.4", port: 4004 },
+      rtt: 80,
+      closerNodes: [{ host: "2.2.2.2", port: 2002 }],
+    },
+  ]);
+
+  assert.deepEqual(
+    rankFrontier(graph.nodes, 2).map(({ endpoint }) => endpoint),
+    ["2.2.2.2:2002", "3.3.3.3:3003"],
+  );
 });

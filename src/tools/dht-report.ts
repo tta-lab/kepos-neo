@@ -1,4 +1,4 @@
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -23,20 +23,20 @@ export interface GeoRecord {
 export interface StabilityCriteria {
   minimumSpanHours: number;
   minimumObservations: number;
-  minimumDistinctHours: number;
+  minimumDistinctBuckets: number;
   maximumStaleHours: number;
 }
 
 export const DEFAULT_STABILITY_CRITERIA: StabilityCriteria = {
   minimumSpanHours: 24,
   minimumObservations: 6,
-  minimumDistinctHours: 3,
+  minimumDistinctBuckets: 3,
   maximumStaleHours: 2,
 };
 
 interface ReportPoint extends GeoRecord, NodeSummary {
   spanHours: number;
-  distinctHours: number;
+  distinctBuckets: number;
   staleHours: number;
   stable: boolean;
 }
@@ -114,7 +114,7 @@ export function buildReportModel(
       (60 * 60 * 1_000);
     const endpointObservations =
       observationsByEndpoint.get(summary.endpoint) ?? [];
-    const distinctHours = observationHours(endpointObservations).size;
+    const distinctBuckets = observationBuckets(endpointObservations).size;
     const staleHours =
       (Date.parse(latestObservation) - Date.parse(summary.lastSeen)) /
       (60 * 60 * 1_000);
@@ -123,7 +123,7 @@ export function buildReportModel(
         ...geo,
         ...summary,
         spanHours,
-        distinctHours,
+        distinctBuckets,
         staleHours,
         stable: isStableCandidate(
           summary,
@@ -197,9 +197,19 @@ export function isStableCandidate(
   return (
     spanHours >= criteria.minimumSpanHours &&
     summary.observations >= criteria.minimumObservations &&
-    observationHours(observations).size >= criteria.minimumDistinctHours &&
+    observationBuckets(observations).size >=
+      criteria.minimumDistinctBuckets &&
     staleHours <= criteria.maximumStaleHours
   );
+}
+
+export function observationBucket(observation: NodeObservation): string {
+  if (observation.snapshot) {
+    return observation.snapshot;
+  }
+  const date = new Date(observation.timestamp);
+  date.setUTCMinutes(0, 0, 0);
+  return date.toISOString();
 }
 
 export function renderReportHtml(model: ReportModel): string {
@@ -230,7 +240,7 @@ export function renderReportHtml(model: ReportModel): string {
 <body>
   <main>
     <h1>HyperDHT geography</h1>
-    <div class="muted">IP-derived locations. Stable candidate: ≥${model.stabilityCriteria.minimumObservations} observations across ≥${model.stabilityCriteria.minimumDistinctHours} distinct hours, spanning ≥${model.stabilityCriteria.minimumSpanHours}h, seen within the latest ${model.stabilityCriteria.maximumStaleHours}h.</div>
+    <div class="muted">IP-derived locations. Stable candidate: ≥${model.stabilityCriteria.minimumObservations} observations across ≥${model.stabilityCriteria.minimumDistinctBuckets} crawl snapshots, spanning ≥${model.stabilityCriteria.minimumSpanHours}h, seen within the latest ${model.stabilityCriteria.maximumStaleHours}h.</div>
     <section class="cards" id="cards"></section>
     <section class="panel"><div id="map"></div></section>
     <section class="grid">
@@ -263,7 +273,7 @@ export function renderReportHtml(model: ReportModel): string {
         lat: points.map((point) => point.latitude),
         lon: points.map((point) => point.longitude),
         text: points.map((point) =>
-          \`\${point.endpoint}<br>\${point.city}, \${point.country}<br>AS\${point.asn ?? "?"} \${point.organization}<br>\${point.observations} observations · \${point.distinctHours} hours · \${point.spanHours.toFixed(1)}h span · \${point.staleHours.toFixed(1)}h stale\`
+          \`\${point.endpoint}<br>\${point.city}, \${point.country}<br>AS\${point.asn ?? "?"} \${point.organization}<br>\${point.observations} observations · \${point.distinctBuckets} snapshots · \${point.spanHours.toFixed(1)}h span · \${point.staleHours.toFixed(1)}h stale\`
         ),
         hoverinfo: "text",
         marker: {
@@ -373,9 +383,7 @@ export function parseObservationJsonl(input: string): NodeObservation[] {
 }
 
 async function runReport(options: ReportOptions): Promise<void> {
-  const observations = await readObservations(
-    path.join(options.inputDir, "observations.jsonl"),
-  );
+  const observations = await readInputObservations(options.inputDir);
   const summaries = summarizeObservations(observations);
   const geos = await readGeoCache(options.cachePath);
 
@@ -489,14 +497,8 @@ function groupObservationsByEndpoint(
   return groups;
 }
 
-function observationHours(observations: NodeObservation[]): Set<string> {
-  return new Set(
-    observations.map((observation) => {
-      const date = new Date(observation.timestamp);
-      date.setUTCMinutes(0, 0, 0);
-      return date.toISOString();
-    }),
-  );
+function observationBuckets(observations: NodeObservation[]): Set<string> {
+  return new Set(observations.map(observationBucket));
 }
 
 async function fetchGeoRecord(host: string): Promise<GeoRecord | null> {
@@ -555,6 +557,36 @@ async function readObservations(filePath: string): Promise<NodeObservation[]> {
   return parseObservationJsonl(await readFile(filePath, "utf8"));
 }
 
+export async function readInputObservations(
+  inputDir: string,
+): Promise<NodeObservation[]> {
+  try {
+    return await readObservations(path.join(inputDir, "observations.jsonl"));
+  } catch (error) {
+    if (
+      !error ||
+      typeof error !== "object" ||
+      !("code" in error) ||
+      error.code !== "ENOENT"
+    ) {
+      throw error;
+    }
+    const snapshotsDir = path.join(inputDir, "snapshots");
+    const entries = await readdir(snapshotsDir, { withFileTypes: true });
+    const observations: NodeObservation[] = [];
+    for (const entry of entries
+      .filter((candidate) => candidate.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      observations.push(
+        ...(await readObservations(
+          path.join(snapshotsDir, entry.name, "observations.jsonl"),
+        )),
+      );
+    }
+    return observations;
+  }
+}
+
 async function readGeoCache(filePath: string): Promise<Map<string, GeoRecord>> {
   try {
     const records = JSON.parse(await readFile(filePath, "utf8")) as GeoRecord[];
@@ -596,7 +628,7 @@ function parseOptions(argv: string[]): ReportOptions {
 
   const inputDir = path.resolve(
     values.get("--input") ??
-      path.join(os.homedir(), ".local", "state", "kepos-neo", "dht-crawl"),
+      path.join(os.homedir(), ".local", "state", "kepos-neo", "dht-graph"),
   );
   return {
     enrich,
@@ -616,9 +648,9 @@ function parseOptions(argv: string[]): ReportOptions {
         values.get("--stable-min-observations"),
         DEFAULT_STABILITY_CRITERIA.minimumObservations,
       ),
-      minimumDistinctHours: positiveNumber(
+      minimumDistinctBuckets: positiveNumber(
         values.get("--stable-min-buckets"),
-        DEFAULT_STABILITY_CRITERIA.minimumDistinctHours,
+        DEFAULT_STABILITY_CRITERIA.minimumDistinctBuckets,
       ),
       maximumStaleHours: positiveNumber(
         values.get("--stable-max-stale-hours"),
