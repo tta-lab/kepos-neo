@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildReportModel,
   enrichHosts,
+  formatCountryLabel,
   parseObservationJsonl,
   renderReportHtml,
   type GeoRecord,
@@ -99,12 +100,14 @@ test("builds geographic, country, ASN, and hourly report data", () => {
     {
       countryCode: "CN",
       country: "China",
+      label: "China (CN)",
       endpoints: 1,
       stableEndpoints: 1,
     },
     {
       countryCode: "US",
       country: "United States",
+      label: "United States (US)",
       endpoints: 1,
       stableEndpoints: 0,
     },
@@ -152,4 +155,11 @@ test("ignores a partial final JSONL record while the crawler is writing", () => 
   const parsed = parseObservationJsonl(`${complete}\n{"timestamp":"partial`);
 
   assert.deepEqual(parsed, [observations[0]]);
+});
+
+test("country charts show the full name with the ISO code", () => {
+  assert.equal(
+    formatCountryLabel({ country: "China", countryCode: "CN" }),
+    "China (CN)",
+  );
 });

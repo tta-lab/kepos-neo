@@ -28,6 +28,7 @@ interface ReportPoint extends GeoRecord, NodeSummary {
 interface CountrySummary {
   countryCode: string;
   country: string;
+  label: string;
   endpoints: number;
   stableEndpoints: number;
 }
@@ -135,6 +136,13 @@ export async function enrichHosts(
   return cache;
 }
 
+export function formatCountryLabel(country: {
+  country: string;
+  countryCode: string;
+}): string {
+  return `${country.country} (${country.countryCode})`;
+}
+
 export function renderReportHtml(model: ReportModel): string {
   const data = JSON.stringify(model).replaceAll("<", "\\u003c");
   return `<!doctype html>
@@ -227,18 +235,22 @@ export function renderReportHtml(model: ReportModel): string {
     Plotly.newPlot("countries", [{
       type: "bar",
       orientation: "h",
-      y: topCountries.map((row) => row.countryCode),
+      y: topCountries.map((row) => row.label),
       x: topCountries.map((row) => row.endpoints),
+      customdata: topCountries.map((row) => [row.country, row.countryCode, row.stableEndpoints]),
+      hovertemplate: "%{customdata[0]} (%{customdata[1]})<br>%{x} endpoints<br>%{customdata[2]} stable<extra></extra>",
       marker: { color: "#6fa8ff" },
       name: "Endpoints",
     }, {
       type: "bar",
       orientation: "h",
-      y: topCountries.map((row) => row.countryCode),
+      y: topCountries.map((row) => row.label),
       x: topCountries.map((row) => row.stableEndpoints),
+      customdata: topCountries.map((row) => [row.country, row.countryCode, row.endpoints]),
+      hovertemplate: "%{customdata[0]} (%{customdata[1]})<br>%{x} stable endpoints<br>%{customdata[2]} total<extra></extra>",
       marker: { color: "#53e6a1" },
       name: "Stable",
-    }], { ...plot, title: "Top countries", barmode: "overlay", margin: { l: 55, r: 20, t: 48, b: 40 } }, { responsive: true });
+    }], { ...plot, title: "Top countries", barmode: "overlay", margin: { l: 140, r: 20, t: 48, b: 40 } }, { responsive: true });
 
     const topAsns = report.asns.slice(0, 15).reverse();
     Plotly.newPlot("asns", [{
@@ -334,6 +346,7 @@ function aggregateCountries(points: ReportPoint[]): CountrySummary[] {
     const current = countries.get(point.countryCode) ?? {
       countryCode: point.countryCode,
       country: point.country,
+      label: formatCountryLabel(point),
       endpoints: 0,
       stableEndpoints: 0,
     };
