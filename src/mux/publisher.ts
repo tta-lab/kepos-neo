@@ -10,15 +10,23 @@ import { startMuxHomeServer, type RunningHomeServer } from "../home/server.js";
 import { createMuxPublisher, type RunningMuxPublisher } from "./transport.js";
 import {
   createDht,
+  dhtStreamSnapshot,
   keyPairFromSeed,
   type DhtAddress,
   type DhtStream,
 } from "./hyperdht.js";
+import {
+  createObservationEmitter,
+  createObservationId,
+  type Observe,
+} from "./observability.js";
 
 export interface StartMuxPublisherOptions {
   stateDir?: string;
   bootstrap?: DhtAddress[];
   log?: (line: string) => void;
+  now?: () => number;
+  observe?: Observe;
 }
 
 export interface RunningMuxPublisherDaemon {
@@ -64,6 +72,7 @@ export async function startMuxPublisher(
   ]);
   const allow = new Set(config.allow);
   const dht = createDht({ bootstrap: options.bootstrap, keyPair });
+  const now = options.now ?? Date.now;
   const streams = new Set<DhtStream>();
   const muxes = new Map<DhtStream, RunningMuxPublisher>();
   let accepted = 0;
@@ -71,15 +80,44 @@ export async function startMuxPublisher(
 
   const server = dht.createServer(
     {
-      firewall: (remotePublicKey) =>
-        !allow.has(remotePublicKey.toString("hex")),
+      firewall: (remotePublicKey) => {
+        const rejected = !allow.has(remotePublicKey.toString("hex"));
+        if (rejected) {
+          const observe = createObservationEmitter({
+            observe: options.observe,
+            role: "publisher",
+            outerId: createObservationId("outer"),
+            now,
+          });
+          observe("outer.rejected", { remotePublicKey });
+        }
+        return rejected;
+      },
       reusableSocket: true,
     },
     (stream) => {
+      const outerId = createObservationId("outer");
+      const observe = createObservationEmitter({
+        observe: options.observe,
+        role: "publisher",
+        outerId,
+        now,
+      });
       accepted++;
       streams.add(stream);
       stream.setKeepAlive?.(10_000);
+      observe("outer.accepted", {
+        remotePublicKey: stream.remotePublicKey,
+      });
+      const reportHandshake = observeHandshake(stream, observe);
+      reportHandshake();
+      observe("outer.connected", {
+        transport: dhtStreamSnapshot(stream),
+      });
       const mux = createMuxPublisher(stream, {
+        outerId,
+        now,
+        observe: options.observe,
         connect: async (serviceId) => {
           const targetPort = targets.get(serviceId);
           if (targetPort === undefined) {
@@ -92,6 +130,9 @@ export async function startMuxPublisher(
       stream.once("close", () => {
         streams.delete(stream);
         muxes.delete(stream);
+        observe("outer.closed", {
+          trigger: stopped ? "local.stop" : "stream.close",
+        });
       });
     },
   );
@@ -142,4 +183,24 @@ async function connectLoopback(port: number): Promise<Socket> {
     socket.once("error", onError);
   });
   return socket;
+}
+
+function observeHandshake(
+  stream: DhtStream,
+  observe: ReturnType<typeof createObservationEmitter>,
+): () => void {
+  let reported = false;
+  const report = (): void => {
+    if (reported) return;
+    reported = true;
+    observe("outer.handshake", {
+      transport: dhtStreamSnapshot(stream),
+    });
+  };
+  if (stream.connected) {
+    report();
+    return report;
+  }
+  stream.once("handshake", report);
+  return report;
 }

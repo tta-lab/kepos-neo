@@ -11,10 +11,17 @@ import { parseSubscriberContact } from "../config.js";
 import { parseClientIdentity } from "../keys.js";
 import {
   createDht,
+  dhtStreamSnapshot,
   keyPairFromSecretKey,
   type DhtAddress,
   type DhtStream,
 } from "./hyperdht.js";
+import {
+  createObservationEmitter,
+  createObservationId,
+  type EmitObservation,
+  type Observe,
+} from "./observability.js";
 import {
   createMuxSubscriber,
   type RunningMuxSubscriber,
@@ -35,6 +42,8 @@ export interface StartMuxSubscriberOptions {
   bootstrap?: DhtAddress[];
   services: MuxSubscriberService[];
   log?: (line: string) => void;
+  now?: () => number;
+  observe?: Observe;
 }
 
 export interface RunningMuxSubscriberDaemon {
@@ -69,6 +78,7 @@ export async function startMuxSubscriber(
   );
   const keyPair = keyPairFromSecretKey(identity.secretKey);
   const dht = createDht({ bootstrap: options.bootstrap, keyPair });
+  const now = options.now ?? Date.now;
   const connection = createPublisherConnection({
     connect: () =>
       dht.connect(Buffer.from(contact.publisherKey, "hex"), {
@@ -76,6 +86,8 @@ export async function startMuxSubscriber(
         reusableSocket: true,
       }),
     log: options.log,
+    now,
+    observe: options.observe,
   });
   const servers: Server[] = [];
   let stopped = false;
@@ -180,6 +192,8 @@ async function openAndBridge(
 function createPublisherConnection(options: {
   connect: () => DhtStream;
   log?: (line: string) => void;
+  now: () => number;
+  observe?: Observe;
 }): ServiceOpener & {
   start: () => Promise<void>;
   stop: () => Promise<void>;
@@ -189,15 +203,29 @@ function createPublisherConnection(options: {
     | undefined;
   let reconnecting: Promise<RunningMuxSubscriber> | undefined;
   let stopped = false;
+  let connectionAttempt = 0;
 
   const install = (
     outer: DhtStream,
     mux: RunningMuxSubscriber,
+    observe: EmitObservation,
   ): RunningMuxSubscriber => {
     current = { outer, mux };
+    let streamError: string | undefined;
+    outer.once("error", (error) => {
+      streamError = error.message;
+    });
     outer.once("close", () => {
       if (current?.outer !== outer) return;
       current = undefined;
+      observe("outer.closed", {
+        trigger: stopped
+          ? "local.stop"
+          : streamError
+            ? "stream.error"
+            : "stream.close",
+        ...(streamError ? { error: streamError } : {}),
+      });
       if (!stopped) {
         options.log?.("Publisher connection closed; reconnecting");
         void reconnect().catch(() => undefined);
@@ -206,8 +234,30 @@ function createPublisherConnection(options: {
     return mux;
   };
 
-  const connectOnce = async (): Promise<RunningMuxSubscriber> => {
+  const connectOnce = async (
+    onFailure?: (observe: EmitObservation) => void,
+  ): Promise<{
+    mux: RunningMuxSubscriber;
+    observe: EmitObservation;
+  }> => {
+    const attempt = ++connectionAttempt;
+    const attemptStartedAt = options.now();
+    const outerId = createObservationId("outer");
+    const observe = createObservationEmitter({
+      observe: options.observe,
+      role: "subscriber",
+      outerId,
+      now: options.now,
+    });
+    observe("outer.attempt", { attempt });
     const outer = options.connect();
+    const reportHandshake = observeHandshake(
+      outer,
+      observe,
+      attempt,
+      attemptStartedAt,
+      options.now,
+    );
     try {
       await waitForConnect(outer);
       if (stopped) {
@@ -215,10 +265,35 @@ function createPublisherConnection(options: {
         throw new Error("Subscriber stopped");
       }
       outer.setKeepAlive?.(10_000);
-      return install(outer, createMuxSubscriber(outer));
+      reportHandshake();
+      observe("outer.connected", {
+        attempt,
+        attemptElapsedMs: options.now() - attemptStartedAt,
+        transport: dhtStreamSnapshot(outer),
+      });
+      return {
+        observe,
+        mux: install(
+          outer,
+          createMuxSubscriber(outer, {
+            outerId,
+            now: options.now,
+            observe: options.observe,
+          }),
+          observe,
+        ),
+      };
     } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      observe("outer.closed", {
+        trigger: "connect.error",
+        error: failure.message,
+        attempt,
+        attemptElapsedMs: options.now() - attemptStartedAt,
+      });
+      onFailure?.(observe);
       outer.destroy();
-      throw error;
+      throw failure;
     }
   };
 
@@ -227,17 +302,33 @@ function createPublisherConnection(options: {
     if (reconnecting) return reconnecting;
     reconnecting = (async () => {
       let delayMs = 100;
+      const recoveryStartedAt = options.now();
+      let recoveryAttempt = 0;
       while (!stopped) {
+        recoveryAttempt++;
+        let failedAttemptObserve: EmitObservation | undefined;
         try {
-          const mux = await connectOnce();
+          const { mux, observe } = await connectOnce((failedObserve) => {
+            failedAttemptObserve = failedObserve;
+          });
           options.log?.("Publisher connection restored");
+          observe("outer.restored", {
+            recoveryAttempt,
+            recoveryElapsedMs: options.now() - recoveryStartedAt,
+          });
           return mux;
         } catch (error) {
           if (stopped) throw error;
+          const message =
+            error instanceof Error ? error.message : String(error);
+          failedAttemptObserve?.("outer.retry", {
+            recoveryAttempt,
+            delayMs,
+            error: message,
+            recoveryElapsedMs: options.now() - recoveryStartedAt,
+          });
           options.log?.(
-            `Publisher reconnect failed; retrying: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            `Publisher reconnect failed; retrying: ${message}`,
           );
           await delay(delayMs);
           delayMs = Math.min(delayMs * 2, 2_000);
@@ -279,6 +370,31 @@ function createPublisherConnection(options: {
       await reconnecting?.catch(() => undefined);
     },
   };
+}
+
+function observeHandshake(
+  stream: DhtStream,
+  observe: EmitObservation,
+  attempt: number,
+  attemptStartedAt: number,
+  now: () => number,
+): () => void {
+  let reported = false;
+  const report = (): void => {
+    if (reported) return;
+    reported = true;
+    observe("outer.handshake", {
+      attempt,
+      attemptElapsedMs: now() - attemptStartedAt,
+      transport: dhtStreamSnapshot(stream),
+    });
+  };
+  if (stream.connected) {
+    report();
+    return report;
+  }
+  stream.once("handshake", report);
+  return report;
 }
 
 async function delay(ms: number): Promise<void> {

@@ -2,6 +2,16 @@ import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { Duplex } from "node:stream";
 
+import {
+  createObservationId,
+  createObservationEmitter,
+  type EmitObservation,
+  type ObservationDirection,
+  type ObservationFields,
+  type ObservationRole,
+  type Observe,
+} from "./observability.js";
+
 const require = createRequire(import.meta.url);
 const Protomux = require("protomux") as ProtomuxConstructor;
 const compact = require("compact-encoding") as CompactEncoding;
@@ -70,6 +80,15 @@ interface TunnelMessages {
 
 export interface MuxPublisherOptions {
   connect: (serviceId: string) => Promise<Duplex>;
+  now?: () => number;
+  observe?: Observe;
+  outerId?: string;
+}
+
+export interface MuxSubscriberOptions {
+  now?: () => number;
+  observe?: Observe;
+  outerId?: string;
 }
 
 export interface RunningMuxPublisher {
@@ -97,9 +116,30 @@ class MuxTunnel extends Duplex {
   };
   private pendingDrain?: (error?: Error | null) => void;
   private remoteClosing = false;
+  private closeTrigger = "local.close";
+  private readonly openedAt: number;
+  private readonly metrics: Record<
+    ObservationDirection,
+    {
+      bytes: number;
+      firstByteAt?: number;
+      lastByteAt?: number;
+    }
+  > = {
+    "subscriber-to-publisher": { bytes: 0 },
+    "publisher-to-subscriber": { bytes: 0 },
+  };
 
-  constructor() {
+  constructor(
+    private readonly options: {
+      emit: EmitObservation;
+      incomingDirection: ObservationDirection;
+      now: () => number;
+      outgoingDirection: ObservationDirection;
+    },
+  ) {
     super({ allowHalfOpen: true });
+    this.openedAt = options.now();
     this.ready = new Promise<void>((resolve, reject) => {
       this.readyResolve = resolve;
       this.readyReject = reject;
@@ -123,37 +163,62 @@ class MuxTunnel extends Duplex {
     const error = new Error(message);
     this.readyReject(error);
     this.remoteClosing = true;
+    this.closeTrigger = "remote.open-error";
     this.destroy();
   }
 
   receive(chunk: Buffer): void {
     if (this.destroyed) return;
+    this.observeBytes(this.options.incomingDirection, chunk);
     if (!this.push(Buffer.from(chunk)) && !this.localPaused) {
       this.localPaused = true;
+      this.options.emit("channel.pause", {
+        direction: this.options.incomingDirection,
+        source: "local",
+      });
       this.messages?.pause.send(null);
     }
   }
 
   receiveFin(): void {
+    this.options.emit("channel.fin", {
+      direction: this.options.incomingDirection,
+      source: "remote",
+    });
     if (!this.destroyed) this.push(null);
   }
 
   receivePause(): void {
     this.remotePaused = true;
+    this.options.emit("channel.pause", {
+      direction: this.options.outgoingDirection,
+      source: "remote",
+    });
   }
 
   receiveResume(): void {
     this.remotePaused = false;
+    this.options.emit("channel.resume", {
+      direction: this.options.outgoingDirection,
+      source: "remote",
+    });
     this.flushPendingWrite();
   }
 
   receiveReset(message: string): void {
     this.remoteClosing = true;
+    this.closeTrigger = "remote.reset";
+    this.options.emit("channel.reset", {
+      direction: this.options.incomingDirection,
+      error: message || "Remote tunnel reset",
+      source: "remote",
+    });
     this.destroy(new Error(message || "Remote tunnel reset"));
   }
 
   remoteClose(): void {
     this.remoteClosing = true;
+    this.closeTrigger = "remote.close";
     if (this.readyState === "pending") {
       this.reject("Remote closed the tunnel before it opened");
       return;
@@ -167,9 +232,19 @@ class MuxTunnel extends Duplex {
     callback?.();
   }
 
+  closeFrom(trigger: string, error?: Error): void {
+    if (this.destroyed) return;
+    this.closeTrigger = trigger;
+    this.destroy(error);
+  }
+
   override _read(): void {
     if (!this.localPaused) return;
     this.localPaused = false;
+    this.options.emit("channel.resume", {
+      direction: this.options.incomingDirection,
+      source: "local",
+    });
     this.messages?.resume.send(null);
   }
 
@@ -187,6 +262,10 @@ class MuxTunnel extends Duplex {
   }
 
   override _final(callback: (error?: Error | null) => void): void {
+    this.options.emit("channel.fin", {
+      direction: this.options.outgoingDirection,
+      source: "local",
+    });
     this.messages?.fin.send(null);
     callback();
   }
@@ -200,8 +279,22 @@ class MuxTunnel extends Duplex {
       this.readyReject(error ?? new Error("Tunnel closed before it opened"));
     }
     if (!this.remoteClosing && error) {
+      if (this.closeTrigger === "local.close") {
+        this.closeTrigger = "local.error";
+      }
+      this.options.emit("channel.reset", {
+        direction: this.options.outgoingDirection,
+        error: error.message,
+        source: "local",
+      });
       this.messages?.reset.send(error.message);
     }
+    this.options.emit("channel.close", {
+      trigger: this.closeTrigger,
+      ...(error ? { error: error.message } : {}),
+      durationMs: this.options.now() - this.openedAt,
+      ...this.transferFields(),
+    });
     this.channel?.close();
     callback(error);
   }
@@ -210,6 +303,7 @@ class MuxTunnel extends Duplex {
     chunk: Buffer,
     callback: (error?: Error | null) => void,
   ): void {
+    this.observeBytes(this.options.outgoingDirection, chunk);
     if (!this.messages?.data.send(chunk)) {
       this.pendingDrain = callback;
       return;
@@ -223,19 +317,68 @@ class MuxTunnel extends Duplex {
     this.pendingWrite = undefined;
     this.sendData(pending.chunk, pending.callback);
   }
+
+  private observeBytes(
+    direction: ObservationDirection,
+    chunk: Buffer,
+  ): void {
+    const observedAt = this.options.now();
+    const metric = this.metrics[direction];
+    metric.bytes += chunk.byteLength;
+    metric.lastByteAt = observedAt;
+    if (metric.firstByteAt !== undefined) return;
+    metric.firstByteAt = observedAt;
+    this.options.emit("channel.first-byte", {
+      direction,
+      bytes: chunk.byteLength,
+    });
+  }
+
+  private transferFields(): ObservationFields {
+    return {
+      ...directionFields(
+        "subscriberToPublisher",
+        this.openedAt,
+        this.metrics["subscriber-to-publisher"],
+      ),
+      ...directionFields(
+        "publisherToSubscriber",
+        this.openedAt,
+        this.metrics["publisher-to-subscriber"],
+      ),
+    };
+  }
 }
 
 export function createMuxSubscriber(
   outer: OuterStream,
+  options: MuxSubscriberOptions = {},
 ): RunningMuxSubscriber {
   const mux = new Protomux(outer);
+  const now = options.now ?? Date.now;
+  const outerId = options.outerId ?? createObservationId("outer");
 
   return {
     async open(serviceId: string): Promise<Duplex> {
-      const tunnel = createTunnel(mux, randomBytes(16), (status) => {
-        if (status === "") tunnel.stream.accept();
-        else tunnel.stream.reject(status);
+      const id = randomBytes(16);
+      const emit = createObservationEmitter({
+        observe: options.observe,
+        role: "subscriber",
+        outerId,
+        channelId: id.toString("hex"),
+        serviceId,
+        now,
       });
+      const tunnel = createTunnel(mux, id, "subscriber", emit, now, (status) => {
+        if (status === "") {
+          tunnel.stream.accept();
+          emit("channel.open-ok");
+        } else {
+          emit("channel.open-error", { error: status });
+          tunnel.stream.reject(status);
+        }
+      });
+      emit("channel.open");
       tunnel.channel.open(serviceId);
       await tunnel.stream.ready;
       return tunnel.stream;
@@ -251,21 +394,49 @@ export function createMuxPublisher(
   options: MuxPublisherOptions,
 ): RunningMuxPublisher {
   const mux = new Protomux(outer);
+  const now = options.now ?? Date.now;
+  const outerId = options.outerId ?? createObservationId("outer");
 
   mux.pair({ protocol }, (id) => {
-    const tunnel = createTunnel(mux, id, () => undefined, async (serviceId) => {
-      try {
-        const target = await options.connect(serviceId);
-        tunnel.stream.accept();
-        tunnel.messages.status.send("");
-        bridge(tunnel.stream, target);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        tunnel.stream.accept();
-        tunnel.messages.status.send(message);
-        queueMicrotask(() => tunnel.channel.close());
-      }
+    let serviceId: string | undefined;
+    const emitBase = createObservationEmitter({
+      observe: options.observe,
+      role: "publisher",
+      outerId,
+      channelId: id.toString("hex"),
+      now,
     });
+    const emit: EmitObservation = (event, fields = {}) =>
+      emitBase(event, {
+        ...(serviceId ? { serviceId } : {}),
+        ...fields,
+      });
+    const tunnel = createTunnel(
+      mux,
+      id,
+      "publisher",
+      emit,
+      now,
+      () => undefined,
+      async (openedServiceId) => {
+        serviceId = openedServiceId;
+        emit("channel.open");
+        try {
+          const target = await options.connect(openedServiceId);
+          tunnel.stream.accept();
+          tunnel.messages.status.send("");
+          emit("channel.open-ok");
+          bridge(tunnel.stream, target);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          tunnel.stream.accept();
+          tunnel.messages.status.send(message);
+          emit("channel.open-error", { error: message });
+          queueMicrotask(() => tunnel.channel.close());
+        }
+      },
+    );
     tunnel.channel.open("");
   });
 
@@ -280,10 +451,24 @@ export function createMuxPublisher(
 function createTunnel(
   mux: MuxInstance,
   id: Buffer,
+  role: ObservationRole,
+  emit: EmitObservation,
+  now: () => number,
   onStatus: (status: string) => void,
   onOpen?: (serviceId: string) => void | Promise<void>,
 ): { channel: MuxChannel; messages: TunnelMessages; stream: MuxTunnel } {
-  const stream = new MuxTunnel();
+  const stream = new MuxTunnel({
+    emit,
+    now,
+    incomingDirection:
+      role === "subscriber"
+        ? "publisher-to-subscriber"
+        : "subscriber-to-publisher",
+    outgoingDirection:
+      role === "subscriber"
+        ? "subscriber-to-publisher"
+        : "publisher-to-subscriber",
+  });
   const channel = mux.createChannel({
     protocol,
     id,
@@ -330,7 +515,36 @@ function bridge(tunnel: MuxTunnel, target: Duplex): void {
   tunnel.pipe(target);
   target.pipe(tunnel);
   tunnel.once("error", (error) => target.destroy(error));
-  target.once("error", (error) => tunnel.destroy(error));
+  target.once("error", (error) => tunnel.closeFrom("target.error", error));
   tunnel.once("close", () => target.destroy());
-  target.once("close", () => tunnel.destroy());
+  target.once("close", () => tunnel.closeFrom("target.close"));
+}
+
+function directionFields(
+  prefix: "subscriberToPublisher" | "publisherToSubscriber",
+  openedAt: number,
+  metric: {
+    bytes: number;
+    firstByteAt?: number;
+    lastByteAt?: number;
+  },
+): ObservationFields {
+  const fields: ObservationFields = {
+    [`${prefix}Bytes`]: metric.bytes,
+  };
+  if (
+    metric.firstByteAt === undefined ||
+    metric.lastByteAt === undefined
+  ) {
+    return fields;
+  }
+  const transferMs = metric.lastByteAt - metric.firstByteAt;
+  return {
+    ...fields,
+    [`${prefix}FirstByteMs`]: metric.firstByteAt - openedAt,
+    [`${prefix}TransferMs`]: transferMs,
+    [`${prefix}BytesPerSecond`]: Math.round(
+      (metric.bytes * 1_000) / Math.max(1, transferMs),
+    ),
+  };
 }

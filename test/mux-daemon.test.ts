@@ -17,6 +17,7 @@ import {
 } from "../src/dogfood/client.js";
 import { setupClient, writePublisherContact } from "../src/dogfood/setup-client.js";
 import { setupPublisher } from "../src/dogfood/setup-publisher.js";
+import type { Observation } from "../src/mux/observability.js";
 
 interface HyperDhtTestnet {
   bootstrap: Array<{ host: string; port: number }>;
@@ -104,6 +105,8 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
   let publisher: RunningDogfoodPublisher | undefined;
   let subscriber: RunningDogfoodClient | undefined;
   let testError: unknown;
+  const publisherEvents: Observation[] = [];
+  const subscriberEvents: Observation[] = [];
 
   try {
     const [sshPort, navidromePort] = await Promise.all([
@@ -135,6 +138,7 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
       log: noLog,
+      observe: (event) => publisherEvents.push(event),
     });
     subscriber = await startDogfoodClient({
       stateDir: subscriberState,
@@ -144,6 +148,7 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
         { id: "ssh", localPort: 0 },
       ],
       log: noLog,
+      observe: (event) => subscriberEvents.push(event),
     });
 
     const navidrome = subscriber.services.find((service) => service.id === "navidrome");
@@ -165,6 +170,23 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     const repeated = await fetch(`${subscriber.home.url}/healthz`);
     assert.equal(repeated.status, 200);
     assert.equal(publisher.acceptedConnections(), 1);
+
+    const subscriberConnected = subscriberEvents.find(
+      ({ event }) => event === "outer.connected",
+    );
+    const subscriberChannel = subscriberEvents.find(
+      ({ event }) => event === "channel.open-ok",
+    );
+    assert.ok(subscriberEvents.some(({ event }) => event === "outer.attempt"));
+    assert.ok(subscriberEvents.some(({ event }) => event === "outer.handshake"));
+    assert.ok(subscriberConnected?.outerId);
+    assert.equal(subscriberChannel?.outerId, subscriberConnected.outerId);
+    assert.ok(
+      publisherEvents.some(({ event }) => event === "outer.accepted"),
+    );
+    assert.ok(
+      publisherEvents.some(({ event }) => event === "outer.connected"),
+    );
   } catch (error) {
     testError = error;
   }
@@ -285,6 +307,7 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
   let publisher: RunningDogfoodPublisher | undefined;
   let unknown: RunningDogfoodClient | undefined;
   let testError: unknown;
+  const publisherEvents: Observation[] = [];
 
   try {
     const [allowedSetup] = await Promise.all([
@@ -309,6 +332,7 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
       log: noLog,
+      observe: (event) => publisherEvents.push(event),
     });
     await assert.rejects(
       async () => {
@@ -323,6 +347,12 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
     );
     assert.equal(publisher.acceptedConnections(), 0);
     assert.equal(publisher.activeSubscribers(), 0);
+    const rejected = publisherEvents.find(
+      ({ event }) => event === "outer.rejected",
+    );
+    assert.ok(rejected?.outerId);
+    assert.equal(typeof rejected.remotePublicKey, "string");
+    assert.equal((rejected.remotePublicKey as string).length, 16);
   } catch (error) {
     testError = error;
   }
@@ -352,6 +382,7 @@ test("subscriber reconnects in the background without changing local ports", asy
   let publisher: RunningDogfoodPublisher | undefined;
   let subscriber: RunningDogfoodClient | undefined;
   let testError: unknown;
+  const subscriberEvents: Observation[] = [];
 
   try {
     const subscriberSetup = await setupClient({
@@ -381,6 +412,7 @@ test("subscriber reconnects in the background without changing local ports", asy
       bootstrap: testnet.bootstrap,
       services: [],
       log: noLog,
+      observe: (event) => subscriberEvents.push(event),
     });
     const homeUrl = subscriber.home.url;
     assert.equal((await fetch(`${homeUrl}/healthz`)).status, 200);
@@ -396,6 +428,13 @@ test("subscriber reconnects in the background without changing local ports", asy
     assert.equal(recovered.status, 200);
     assert.equal(subscriber.home.url, homeUrl);
     assert.equal(publisher.acceptedConnections(), 1);
+    assert.ok(subscriberEvents.some(({ event }) => event === "outer.closed"));
+    assert.ok(subscriberEvents.some(({ event }) => event === "outer.restored"));
+    const connectedOuterIds = subscriberEvents
+      .filter(({ event }) => event === "outer.connected")
+      .map(({ outerId }) => outerId);
+    assert.equal(connectedOuterIds.length, 2);
+    assert.notEqual(connectedOuterIds[0], connectedOuterIds[1]);
   } catch (error) {
     testError = error;
   }

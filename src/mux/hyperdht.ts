@@ -1,6 +1,8 @@
 import { createRequire } from "node:module";
 import { Duplex } from "node:stream";
 
+import { sanitizeObservation } from "./observability.js";
+
 const require = createRequire(import.meta.url);
 const HyperDHT = require("hyperdht") as HyperDhtConstructor;
 
@@ -18,6 +20,7 @@ export interface DhtStream extends Duplex {
   connected?: boolean;
   remotePublicKey: Buffer;
   setKeepAlive?: (intervalMs: number) => void;
+  toJSON?: () => unknown;
 }
 
 export interface DhtServer {
@@ -68,4 +71,8 @@ export function keyPairFromSeed(seed: string): DhtKeyPair {
 
 export function keyPairFromSecretKey(secretKey: string): DhtKeyPair {
   return HyperDHT.keyPair(Buffer.from(secretKey.slice(0, 64), "hex"));
+}
+
+export function dhtStreamSnapshot(stream: DhtStream): unknown {
+  return sanitizeObservation(stream.toJSON?.() ?? null);
 }

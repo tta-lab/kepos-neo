@@ -81,6 +81,8 @@ export async function startDogfoodClient(
         : [{ host: "127.0.0.1", port: options.testBootstrapPort }]),
     services: options.services,
     log: options.log,
+    now: options.now,
+    observe: options.observe,
   });
   return {
     ...running,

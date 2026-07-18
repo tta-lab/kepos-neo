@@ -55,6 +55,8 @@ export async function startDogfoodPublisher(
         ? undefined
         : [{ host: "127.0.0.1", port: options.testBootstrapPort }]),
     log: options.log,
+    now: options.now,
+    observe: options.observe,
   });
   return {
     ...running,
