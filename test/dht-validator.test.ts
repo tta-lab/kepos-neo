@@ -11,10 +11,12 @@ import {
   buildRecommendationPayload,
   guardProbeSocketErrors,
   readBootstrapDiscoveries,
+  selectValidationCandidates,
   signRecommendationPayload,
   validateBootstrapCandidate,
   verifySignedRecommendation,
   type BootstrapDiscovery,
+  type BootstrapCandidate,
   type BootstrapValidation,
 } from "../src/tools/dht-validator.js";
 import type { GeoRecord } from "../src/tools/dht-report.js";
@@ -281,6 +283,39 @@ test("probe sockets keep reset errors from terminating the validator", () => {
   assert.doesNotThrow(() => socket.emit("error", new Error("reset")));
 });
 
+test("validation batches skip recent hosts and spread work across ASN and country", () => {
+  const candidates = [
+    candidate("1.1.1.1:49737", "1.1.1.1", "CN", 100),
+    candidate("1.1.1.1:50000", "1.1.1.1", "CN", 100),
+    candidate("2.2.2.2:49737", "2.2.2.2", "CN", 100),
+    candidate("3.3.3.3:49737", "3.3.3.3", "CN", 200),
+    candidate("4.4.4.4:49737", "4.4.4.4", "HK", 300),
+  ];
+  const validations: BootstrapValidation[] = [
+    {
+      endpoint: "1.1.1.1:49737",
+      timestamp: "2026-07-18T12:00:00.000Z",
+      success: true,
+      bootstrapMs: 500,
+      lookupReplies: 10,
+      announceConnect: true,
+      connectMs: 700,
+    },
+  ];
+
+  const selected = selectValidationCandidates(candidates, validations, {
+    limit: 3,
+    recheckCutoff: "2026-07-18T00:00:00.000Z",
+    maximumPerAsn: 1,
+    maximumPerCountry: 2,
+  });
+
+  assert.deepEqual(
+    selected.map(({ endpoint }) => endpoint),
+    ["2.2.2.2:49737", "3.3.3.3:49737", "4.4.4.4:49737"],
+  );
+});
+
 function successfulValidations(endpoint: string): BootstrapValidation[] {
   return [
     {
@@ -302,4 +337,27 @@ function successfulValidations(endpoint: string): BootstrapValidation[] {
       connectMs: 700,
     },
   ];
+}
+
+function candidate(
+  endpoint: string,
+  host: string,
+  countryCode: string,
+  asn: number,
+): BootstrapCandidate {
+  return {
+    endpoint,
+    host,
+    port: Number(endpoint.split(":").at(-1)),
+    firstSeen: "2026-07-18T00:00:00.000Z",
+    lastSeen: "2026-07-18T12:00:00.000Z",
+    snapshots: 2,
+    minimumRttMs: 50,
+    countryCode,
+    country: countryCode,
+    city: "",
+    asn,
+    organization: `AS${asn}`,
+    regionTier: countryCode === "CN" ? 0 : 1,
+  };
 }

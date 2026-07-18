@@ -85,6 +85,11 @@ npm run validate:dht -- \
   --recheck-hours 12
 ```
 
+Each validation batch skips every port on a host tested within the recheck
+window, selects at most one endpoint per ASN, and caps each country at two
+endpoints. This spends active probes on independent networks instead of
+retesting NAT or process churn behind one public IP.
+
 For each selected endpoint, the validator creates two clean HyperDHT clients
 whose only initial bootstrap is that endpoint. It requires bootstrap, a
 successful `findNode` lookup, server announce, and an encrypted connection

@@ -78,6 +78,13 @@ export interface RecommendationCriteria {
   maximumPerCountry: number;
 }
 
+export interface ValidationSelectionCriteria {
+  limit: number;
+  recheckCutoff: string;
+  maximumPerAsn: number;
+  maximumPerCountry: number;
+}
+
 export interface RecommendedEndpoint {
   endpoint: string;
   host: string;
@@ -282,6 +289,64 @@ export function buildRecommendationPayload(
     }
   }
   return { generatedAt, endpoints };
+}
+
+export function selectValidationCandidates(
+  candidates: BootstrapCandidate[],
+  validations: BootstrapValidation[],
+  criteria: ValidationSelectionCriteria,
+): BootstrapCandidate[] {
+  const candidateByEndpoint = new Map(
+    candidates.map((candidate) => [candidate.endpoint, candidate]),
+  );
+  const recentHosts = new Set(
+    validations
+      .filter(
+        ({ timestamp }) =>
+          timestamp.localeCompare(criteria.recheckCutoff) >= 0,
+      )
+      .flatMap(({ endpoint }) => {
+        const candidate = candidateByEndpoint.get(endpoint);
+        return candidate ? [candidate.host] : [];
+      }),
+  );
+  const selected: BootstrapCandidate[] = [];
+  const selectedHosts = new Set<string>();
+  const asnCounts = new Map<number, number>();
+  const countryCounts = new Map<string, number>();
+  for (const candidate of candidates) {
+    if (
+      recentHosts.has(candidate.host) ||
+      selectedHosts.has(candidate.host)
+    ) {
+      continue;
+    }
+    if (
+      candidate.asn !== null &&
+      (asnCounts.get(candidate.asn) ?? 0) >= criteria.maximumPerAsn
+    ) {
+      continue;
+    }
+    if (
+      (countryCounts.get(candidate.countryCode) ?? 0) >=
+      criteria.maximumPerCountry
+    ) {
+      continue;
+    }
+    selected.push(candidate);
+    selectedHosts.add(candidate.host);
+    if (candidate.asn !== null) {
+      asnCounts.set(candidate.asn, (asnCounts.get(candidate.asn) ?? 0) + 1);
+    }
+    countryCounts.set(
+      candidate.countryCode,
+      (countryCounts.get(candidate.countryCode) ?? 0) + 1,
+    );
+    if (selected.length >= criteria.limit) {
+      break;
+    }
+  }
+  return selected;
 }
 
 export async function validateBootstrapCandidate(
@@ -515,14 +580,12 @@ async function runValidator(options: ValidatorOptions): Promise<void> {
   const validations = await readValidations(validationsPath);
   const recheckCutoff =
     Date.now() - options.recheckHours * 60 * 60 * 1_000;
-  const recentEndpoints = new Set(
-    validations
-      .filter(({ timestamp }) => Date.parse(timestamp) >= recheckCutoff)
-      .map(({ endpoint }) => endpoint),
-  );
-  const selected = candidates
-    .filter(({ endpoint }) => !recentEndpoints.has(endpoint))
-    .slice(0, options.limit);
+  const selected = selectValidationCandidates(candidates, validations, {
+    limit: options.limit,
+    recheckCutoff: new Date(recheckCutoff).toISOString(),
+    maximumPerAsn: 1,
+    maximumPerCountry: 2,
+  });
 
   console.log(
     `Validating ${selected.length}/${candidates.length} stable discovery candidates`,
