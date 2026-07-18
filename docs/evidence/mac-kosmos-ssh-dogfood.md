@@ -79,6 +79,24 @@ conditions vary. The migration adds no transport gzip: Home/HTTP and
 Navidrome already have application-level compression choices, while SSH is
 encrypted and media payloads are generally incompressible.
 
+### Migration provenance
+
+The route mapping, connection/retry timing, sanitized DHT snapshots,
+first-byte and byte-count metrics, transfer-rate calculation, and close-source
+observations were adapted from the Hypertele fork at
+`cdb851bf750369d5b9eaead3975580e8459fe025` on
+`feat/kepos-transport-spike`.
+
+The raw probe was not migrated: an open HyperDHT stream describes transport
+connectivity, while a successful Protomux `open-ok` describes acceptance of a
+specific service. A stronger application-health protocol is deferred until
+field evidence shows that those states are insufficient.
+
+The persistent outer connection, Protomux service protocol, publisher
+allowlist, shared runtime, and state model are Kepos-specific. Full attribution
+and the source package's declared MIT metadata are in
+`THIRD_PARTY_NOTICES.md`.
+
 ## Earlier public-path proof
 
 ```text

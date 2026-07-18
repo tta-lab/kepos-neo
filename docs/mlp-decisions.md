@@ -442,23 +442,26 @@ signal nor require users to configure it.
 
 ## Current implementation order
 
-1. Finish migrating useful route, retry, and observation behavior into the
-   shared Kepos runtime.
-2. Remove the executable P0 path and Hypertele dependency.
-3. Keep the foreground CLI as the headless host and build the desktop host over
+1. Merge the canonical transport migration after its shared runtime, route,
+   observation, reconnect, and P0-removal checks pass.
+2. Keep the foreground CLI as the headless host and build the desktop host over
    the same lifecycle APIs and state.
-4. Use field evidence to decide whether application health, diagnostics
+3. Use field evidence to decide whether application health, diagnostics
    storage, native packaging hardening, or multi-publisher support is needed.
-5. Run a broader direct-path matrix when stable hosts and testers are
+4. Run a broader direct-path matrix when stable hosts and testers are
    available.
-6. Build an MLP V2 blind UDX relay only after measured direct-path failures
+5. Build an MLP V2 blind UDX relay only after measured direct-path failures
    justify it.
-7. Use measured relay results to decide whether a TCP/443 relay is needed.
+6. Use measured relay results to decide whether a TCP/443 relay is needed.
 
 Historical P0 evidence must not claim public-DHT reachability, NAT punching,
 CGNAT, cross-carrier quality, mobile lifecycle, or relay need beyond what was
 actually tested.
 
-Copied or adapted Hypertele behavior retains upstream provenance and records
-that the source package declared MIT even though its repository omitted a
-standalone LICENSE file.
+The migrated route, retry, snapshot, and transfer-observation behavior came
+from Hypertele fork commit
+`cdb851bf750369d5b9eaead3975580e8459fe025`. The raw probe, gzip mode, CLI, and
+one-connection-per-local-TCP architecture were not migrated. The persistent
+Protomux runtime is a Kepos-specific rewrite. `THIRD_PARTY_NOTICES.md` records
+upstream provenance and the source package's declared MIT metadata; the source
+repository had no standalone LICENSE file at the migration commit.
