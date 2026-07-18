@@ -104,18 +104,27 @@ cross-origin JavaScript still follows CORS, CSP, cookie, and Origin rules.
 Each publisher owns one allowlist. Every service explicitly published by that
 publisher uses the same trusted peer-key set.
 
-MLP does not require multiplex before evidence:
+P0 allowed one Hypertele process and one service key per published service.
+Public-path dogfood then measured multi-second cold connection setup and showed
+that a route is reusable for only a short window after each connection closes.
+The next transport shape is therefore:
 
-- P0 may run one pinned Hypertele server process per published service.
-- A small local supervisor may generate each process configuration from the
-  same publisher allowlist.
-- Service registry and local gateway are higher priority than combining
-  processes.
-- A single daemon and Protomux multiplex remain the preferred later shape, but
-  are implemented only if process count, connection setup, or resource usage
-  becomes a measured problem.
-- Regardless of process shape, remote peers cannot select an arbitrary target
-  host or port. Targets come only from publisher-local service configuration.
+- one publisher daemon instead of one Hypertele child per service;
+- one subscriber daemon instead of one Hypertele child per local endpoint;
+- one persistent authenticated connection between a subscriber and publisher;
+- one Protomux instance on that connection;
+- one logical channel per proxied TCP connection, with `serviceId` selecting
+  Home, Navidrome, SSH, or another configured service;
+- background keepalive and reconnect owned by the daemon, independent of
+  browser, player, or SSH socket lifetimes.
+
+A subscriber defaults to one configured publisher in the first version. A
+publisher may accept multiple subscribers concurrently, with one independent
+persistent connection per subscriber. The protocol may support multiple
+publishers later, but the first client does not manage them.
+
+Remote peers cannot select an arbitrary target host or port. A `serviceId`
+resolves only through publisher-local configuration.
 
 ### Runtime and package management
 
@@ -124,6 +133,9 @@ MLP does not require multiplex before evidence:
 - npm manages dependencies and scripts.
 - P0 invokes the pinned Hypertele CLI from Node rather than requiring a global
   user installation.
+- The multiplex daemon is run manually during the first spike. launchd,
+  Windows Service integration, scheduled tasks, login startup, and desktop
+  lifecycle UI are deployment work, not transport requirements.
 - Desktop framework and Android packaging are deferred until the network and
   service model pass P0.
 
@@ -150,29 +162,49 @@ checks the corresponding public key against the allowlist.
 
 ### MLP key model
 
-MLP has three key roles and no separate `publisherKey` or `personKey`:
+The persistent multiplex model has two key roles and no separate key per
+service:
 
 | Key | Held or learned by | Purpose |
 | --- | --- | --- |
-| `clientKey` | Generated and held by the connecting client | Proves the client identity checked by a publisher allowlist |
-| `homeKey` | Held by the publisher; pinned by each client | Stable publisher entry point, Home service address, and live Registry trust anchor |
-| `serviceKey` | Held by each separately exposed Hypertele service; learned by clients from Registry | Connects to one published service while MLP uses one process per service |
+| `subscriberKey` | Generated and held by the connecting subscriber | Proves the subscriber identity checked by a publisher allowlist |
+| `publisherKey` | Held by the publisher and pinned by each subscriber | Stable publisher identity, DHT entry point, and Registry trust anchor |
 
 Out-of-band pairing exchanges only two public values:
 
 ```text
-client -> publisher: clientPublicKey
-publisher -> client: homePublicKey
+subscriber -> publisher: subscriberPublicKey
+publisher -> subscriber: publisherPublicKey
 ```
 
-The client stores its own `clientSecretKey` locally and binds a local Person
-label such as Alice to `homePublicKey`. It does not manually learn individual
-service keys. After connecting to `homeKey`, it fetches Registry and caches the
-declared `serviceKey` values under that pinned Home.
+The subscriber stores its own secret key locally and binds a local Person label
+such as Alice to `publisherKey`. After authentication, Registry entries name
+services by `serviceId`; they do not contain service keys. Opening a service is
+an authenticated multiplex operation on the existing publisher connection.
 
-`homeKey` is the publisher identity for MLP. Rotating it requires re-pairing.
-A later Person root could sign a replacement Home key, but that recovery layer
-is explicitly deferred.
+The current P0 `homeKey` becomes `publisherKey` during migration. Current
+per-service keys and Hypertele child processes remain test fixtures until the
+multiplex daemon replaces them; they are not part of the target protocol.
+
+Rotating `publisherKey` requires re-pairing. A later Person root could sign a
+replacement publisher key, but that recovery layer is explicitly deferred.
+
+### Deferred from the first multiplex version
+
+- one subscriber maintaining connections to multiple publishers;
+- per-service allowlists, roles, or grants;
+- one key or DHT announcement per service;
+- launchd, Windows Service, scheduled-task, login-startup, or desktop UI work;
+- mobile background lifecycle and battery policy;
+- relay operation or TCP/WSS fallback;
+- multiple outer connections per subscriber for traffic classes;
+- transparent recovery of an active TCP stream after the outer connection
+  drops;
+- arbitrary remote target hosts or ports.
+
+The first version must still support multiple subscribers per publisher,
+multiple published services, and multiple concurrent logical TCP channels on
+each subscriber connection.
 
 ## Network stages
 
