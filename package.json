@@ -12,7 +12,8 @@
     "test": "node --import tsx --test",
     "build:home": "tailwindcss -i home/styles.input.css -o home/styles.css --minify",
     "kepos": "tsx src/cli/main.ts",
-    "crawl:dht": "tsx src/tools/dht-crawler.ts"
+    "crawl:dht": "tsx src/tools/dht-crawler.ts",
+    "report:dht": "tsx src/tools/dht-report.ts"
   },
   "dependencies": {
     "compact-encoding": "^3.3.0",

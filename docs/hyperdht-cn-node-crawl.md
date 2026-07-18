@@ -31,3 +31,17 @@ Do not promote a discovered endpoint directly into Kepos defaults. First start
 a clean client with only that endpoint in its bootstrap list and verify DHT
 lookup, announce, connect, fixed UDP port, and continued reachability over
 multiple days.
+
+Generate the geographic report after or during a crawl:
+
+```sh
+npm run report:dht -- \
+  --input ~/.local/state/kepos-neo/dht-crawl \
+  --enrich
+```
+
+`--enrich` looks up missing IP locations one at a time and caches them in
+`geo-cache.json`. Later report runs reuse the cache and can omit the flag. The
+generated `report.html` contains the collected data and uses Plotly from its
+CDN to render the world map, country and ASN rankings, hourly reach, and node
+stability.
