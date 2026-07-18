@@ -15,7 +15,7 @@ import {
   readStateJson,
   validateStateDirectory,
   writeStateDirectoryAtomically,
-} from "./state.js";
+} from "../state/files.js";
 import { parseTcpPort, takeOptionValue } from "./cli.js";
 
 const manifestFileName = "publisher.manifest.json";

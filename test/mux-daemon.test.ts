@@ -8,15 +8,18 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  startDogfoodPublisher,
-  type RunningDogfoodPublisher,
-} from "../src/dogfood/publisher.js";
+  startPublisher,
+  type RunningPublisher,
+} from "../src/runtime/publisher.js";
 import {
-  startDogfoodClient,
-  type RunningDogfoodClient,
-} from "../src/dogfood/client.js";
-import { setupClient, writePublisherContact } from "../src/dogfood/setup-client.js";
-import { setupPublisher } from "../src/dogfood/setup-publisher.js";
+  startSubscriber,
+  type RunningSubscriber,
+} from "../src/runtime/subscriber.js";
+import { setupPublisher } from "../src/state/publisher.js";
+import {
+  setSubscriberPublisher,
+  setupSubscriber,
+} from "../src/state/subscriber.js";
 import type { Observation } from "../src/mux/observability.js";
 
 interface HyperDhtTestnet {
@@ -102,8 +105,8 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     response.end(Buffer.alloc(64 * 1024, 7));
   });
   let testnet: HyperDhtTestnet | undefined;
-  let publisher: RunningDogfoodPublisher | undefined;
-  let subscriber: RunningDogfoodClient | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
   let testError: unknown;
   const publisherEvents: Observation[] = [];
   const subscriberEvents: Observation[] = [];
@@ -113,34 +116,32 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
       listen(sshServer),
       listen(navidromeServer),
     ]);
-    const subscriberSetup = await setupClient({
+    const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
-      log: noLog,
     });
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      clientPublicKeys: [subscriberSetup.publicKey],
+      subscriberPublicKeys: [subscriberSetup.publicKey],
       services: [
         { id: "navidrome", name: "Navidrome", targetPort: navidromePort },
         { id: "ssh", name: "SSH", targetPort: sshPort },
       ],
-      log: noLog,
     });
-    await writePublisherContact({
+    await setSubscriberPublisher({
       stateDir: subscriberState,
       label: "kosmos",
       publisherKey: publisherSetup.publisherKey,
     });
 
     testnet = await createHyperDhtTestnet(3);
-    publisher = await startDogfoodPublisher({
+    publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
       log: noLog,
       observe: (event) => publisherEvents.push(event),
     });
-    subscriber = await startDogfoodClient({
+    subscriber = await startSubscriber({
       stateDir: subscriberState,
       bootstrap: testnet.bootstrap,
       services: [
@@ -217,33 +218,32 @@ test("one publisher accepts multiple subscribers with independent connections", 
   const subscriberAState = path.join(root, "subscriber-a");
   const subscriberBState = path.join(root, "subscriber-b");
   let testnet: HyperDhtTestnet | undefined;
-  let publisher: RunningDogfoodPublisher | undefined;
-  let subscriberA: RunningDogfoodClient | undefined;
-  let subscriberB: RunningDogfoodClient | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriberA: RunningSubscriber | undefined;
+  let subscriberB: RunningSubscriber | undefined;
   let testError: unknown;
 
   try {
     const [subscriberASetup, subscriberBSetup] = await Promise.all([
-      setupClient({ stateDir: subscriberAState, log: noLog }),
-      setupClient({ stateDir: subscriberBState, log: noLog }),
+      setupSubscriber({ stateDir: subscriberAState }),
+      setupSubscriber({ stateDir: subscriberBState }),
     ]);
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      clientPublicKeys: [
+      subscriberPublicKeys: [
         subscriberASetup.publicKey,
         subscriberBSetup.publicKey,
       ],
       services: [],
-      log: noLog,
     });
     await Promise.all([
-      writePublisherContact({
+      setSubscriberPublisher({
         stateDir: subscriberAState,
         label: "kosmos",
         publisherKey: publisherSetup.publisherKey,
       }),
-      writePublisherContact({
+      setSubscriberPublisher({
         stateDir: subscriberBState,
         label: "kosmos",
         publisherKey: publisherSetup.publisherKey,
@@ -251,18 +251,18 @@ test("one publisher accepts multiple subscribers with independent connections", 
     ]);
 
     testnet = await createHyperDhtTestnet(3);
-    publisher = await startDogfoodPublisher({
+    publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
       log: noLog,
     });
-    subscriberA = await startDogfoodClient({
+    subscriberA = await startSubscriber({
       stateDir: subscriberAState,
       bootstrap: testnet.bootstrap,
       services: [],
       log: noLog,
     });
-    subscriberB = await startDogfoodClient({
+    subscriberB = await startSubscriber({
       stateDir: subscriberBState,
       bootstrap: testnet.bootstrap,
       services: [],
@@ -305,31 +305,30 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
   const unknownState = path.join(root, "unknown");
   const publisherState = path.join(root, "publisher");
   let testnet: HyperDhtTestnet | undefined;
-  let publisher: RunningDogfoodPublisher | undefined;
-  let unknown: RunningDogfoodClient | undefined;
+  let publisher: RunningPublisher | undefined;
+  let unknown: RunningSubscriber | undefined;
   let testError: unknown;
   const publisherEvents: Observation[] = [];
 
   try {
     const [allowedSetup] = await Promise.all([
-      setupClient({ stateDir: allowedState, log: noLog }),
-      setupClient({ stateDir: unknownState, log: noLog }),
+      setupSubscriber({ stateDir: allowedState }),
+      setupSubscriber({ stateDir: unknownState }),
     ]);
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      clientPublicKeys: [allowedSetup.publicKey],
+      subscriberPublicKeys: [allowedSetup.publicKey],
       services: [],
-      log: noLog,
     });
-    await writePublisherContact({
+    await setSubscriberPublisher({
       stateDir: unknownState,
       label: "kosmos",
       publisherKey: publisherSetup.publisherKey,
     });
 
     testnet = await createHyperDhtTestnet(3);
-    publisher = await startDogfoodPublisher({
+    publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
       log: noLog,
@@ -337,7 +336,7 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
     });
     await assert.rejects(
       async () => {
-        unknown = await startDogfoodClient({
+        unknown = await startSubscriber({
           stateDir: unknownState,
           bootstrap: testnet?.bootstrap,
           services: [],
@@ -380,35 +379,33 @@ test("subscriber reconnects in the background without changing local ports", asy
   const subscriberState = path.join(root, "subscriber");
   const publisherState = path.join(root, "publisher");
   let testnet: HyperDhtTestnet | undefined;
-  let publisher: RunningDogfoodPublisher | undefined;
-  let subscriber: RunningDogfoodClient | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
   let testError: unknown;
   const subscriberEvents: Observation[] = [];
 
   try {
-    const subscriberSetup = await setupClient({
+    const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
-      log: noLog,
     });
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      clientPublicKeys: [subscriberSetup.publicKey],
+      subscriberPublicKeys: [subscriberSetup.publicKey],
       services: [],
-      log: noLog,
     });
-    await writePublisherContact({
+    await setSubscriberPublisher({
       stateDir: subscriberState,
       label: "kosmos",
       publisherKey: publisherSetup.publisherKey,
     });
     testnet = await createHyperDhtTestnet(3);
-    publisher = await startDogfoodPublisher({
+    publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
       log: noLog,
     });
-    subscriber = await startDogfoodClient({
+    subscriber = await startSubscriber({
       stateDir: subscriberState,
       bootstrap: testnet.bootstrap,
       services: [],
@@ -419,7 +416,7 @@ test("subscriber reconnects in the background without changing local ports", asy
     assert.equal((await fetch(`${homeUrl}/healthz`)).status, 200);
 
     await publisher.stop();
-    publisher = await startDogfoodPublisher({
+    publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
       log: noLog,

@@ -11,7 +11,7 @@ import {
   readStateJson,
   validateStateDirectory,
   writeStateFileAtomically,
-} from "./state.js";
+} from "../state/files.js";
 
 export interface UpdatePublisherAllowlistOptions {
   stateDir: string;

@@ -134,6 +134,7 @@ class MuxTunnel extends Duplex {
     private readonly options: {
       emit: EmitObservation;
       incomingDirection: ObservationDirection;
+      measure: boolean;
       now: () => number;
       outgoingDirection: ObservationDirection;
     },
@@ -322,6 +323,7 @@ class MuxTunnel extends Duplex {
     direction: ObservationDirection,
     chunk: Buffer,
   ): void {
+    if (!this.options.measure) return;
     const observedAt = this.options.now();
     const metric = this.metrics[direction];
     metric.bytes += chunk.byteLength;
@@ -369,15 +371,23 @@ export function createMuxSubscriber(
         serviceId,
         now,
       });
-      const tunnel = createTunnel(mux, id, "subscriber", emit, now, (status) => {
-        if (status === "") {
-          tunnel.stream.accept();
-          emit("channel.open-ok");
-        } else {
-          emit("channel.open-error", { error: status });
-          tunnel.stream.reject(status);
-        }
-      });
+      const tunnel = createTunnel(
+        mux,
+        id,
+        "subscriber",
+        emit,
+        options.observe !== undefined,
+        now,
+        (status) => {
+          if (status === "") {
+            tunnel.stream.accept();
+            emit("channel.open-ok");
+          } else {
+            emit("channel.open-error", { error: status });
+            tunnel.stream.reject(status);
+          }
+        },
+      );
       emit("channel.open");
       tunnel.channel.open(serviceId);
       await tunnel.stream.ready;
@@ -416,6 +426,7 @@ export function createMuxPublisher(
       id,
       "publisher",
       emit,
+      options.observe !== undefined,
       now,
       () => undefined,
       async (openedServiceId) => {
@@ -453,12 +464,14 @@ function createTunnel(
   id: Buffer,
   role: ObservationRole,
   emit: EmitObservation,
+  measure: boolean,
   now: () => number,
   onStatus: (status: string) => void,
   onOpen?: (serviceId: string) => void | Promise<void>,
 ): { channel: MuxChannel; messages: TunnelMessages; stream: MuxTunnel } {
   const stream = new MuxTunnel({
     emit,
+    measure,
     now,
     incomingDirection:
       role === "subscriber"

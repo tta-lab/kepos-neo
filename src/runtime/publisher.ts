@@ -1,58 +1,54 @@
-import { readFile } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
-import path from "node:path";
 
-import {
-  parsePublisherConfig,
-  parsePublisherManifest,
-} from "../config.js";
 import { startMuxHomeServer, type RunningHomeServer } from "../home/server.js";
-import { createMuxPublisher, type RunningMuxPublisher } from "./transport.js";
 import {
   createDht,
   dhtStreamSnapshot,
   keyPairFromSeed,
   type DhtAddress,
   type DhtStream,
-} from "./hyperdht.js";
+} from "../mux/hyperdht.js";
 import {
   createObservationEmitter,
   createObservationId,
   type Observe,
-} from "./observability.js";
+} from "../mux/observability.js";
+import {
+  createMuxPublisher,
+  type RunningMuxPublisher,
+} from "../mux/transport.js";
+import { loadPublisherState } from "../state/publisher.js";
 
-export interface StartMuxPublisherOptions {
-  stateDir?: string;
+export interface StartPublisherOptions {
+  stateDir: string;
   bootstrap?: DhtAddress[];
   log?: (line: string) => void;
   now?: () => number;
   observe?: Observe;
 }
 
-export interface RunningMuxPublisherDaemon {
+export interface PublisherRuntimeStatus {
+  role: "publisher";
+  state: "running" | "stopped";
+  publisherKey: string;
+  homeUrl: string;
+  acceptedConnections: number;
+  activeSubscribers: number;
+}
+
+export interface RunningPublisher {
   publisherKey: string;
   home: RunningHomeServer;
   acceptedConnections: () => number;
   activeSubscribers: () => number;
+  status: () => PublisherRuntimeStatus;
   stop: () => Promise<void>;
 }
 
-export async function startMuxPublisher(
-  options: StartMuxPublisherOptions = {},
-): Promise<RunningMuxPublisherDaemon> {
-  const stateDir = path.resolve(
-    options.stateDir ?? path.join("tmp", "dogfood", "publisher"),
-  );
-  const manifest = parsePublisherManifest(
-    JSON.parse(
-      await readFile(path.join(stateDir, "publisher.manifest.json"), "utf8"),
-    ) as unknown,
-  );
-  const config = parsePublisherConfig(
-    JSON.parse(
-      await readFile(path.join(stateDir, manifest.publisherConfig), "utf8"),
-    ) as unknown,
-  );
+export async function startPublisher(
+  options: StartPublisherOptions,
+): Promise<RunningPublisher> {
+  const { config, manifest } = await loadPublisherState(options.stateDir);
   const keyPair = keyPairFromSeed(config.seed);
   const publisherKey = keyPair.publicKey.toString("hex");
   const home = await startMuxHomeServer({
@@ -151,6 +147,14 @@ export async function startMuxPublisher(
     home,
     acceptedConnections: () => accepted,
     activeSubscribers: () => streams.size,
+    status: () => ({
+      role: "publisher",
+      state: stopped ? "stopped" : "running",
+      publisherKey,
+      homeUrl: home.url,
+      acceptedConnections: accepted,
+      activeSubscribers: streams.size,
+    }),
     async stop(): Promise<void> {
       if (stopped) return;
       stopped = true;

@@ -17,7 +17,7 @@ import {
   validateStateDirectory,
   writeStateDirectoryAtomically,
   writeStateFileAtomically,
-} from "./state.js";
+} from "../state/files.js";
 import { takeOptionValue } from "./cli.js";
 
 const identityFileName = "client.identity.json";

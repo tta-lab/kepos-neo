@@ -3,21 +3,22 @@ import { pathToFileURL } from "node:url";
 
 import { parseRoute } from "../mux/route.js";
 import {
-  startMuxSubscriber,
-  type MuxSubscriberService,
-  type RunningMuxSubscriberDaemon,
-  type StartMuxSubscriberOptions,
-} from "../mux/subscriber.js";
+  startSubscriber,
+  type RunningSubscriber,
+  type StartSubscriberOptions,
+  type SubscriberService,
+} from "../runtime/subscriber.js";
 import { parseTcpPort, takeOptionValue, waitForSignal } from "./cli.js";
 
 export interface DogfoodClientOptions
-  extends Omit<StartMuxSubscriberOptions, "services"> {
-  services: MuxSubscriberService[];
+  extends Omit<StartSubscriberOptions, "services" | "stateDir"> {
+  stateDir?: string;
+  services: SubscriberService[];
   testBootstrapPort?: number;
 }
 
 export interface RunningDogfoodClient
-  extends RunningMuxSubscriberDaemon {
+  extends RunningSubscriber {
   waitForExit: () => Promise<void>;
 }
 
@@ -26,7 +27,7 @@ export type DogfoodClientCliOptions = Pick<
   "route" | "stateDir" | "services" | "testBootstrapPort"
 >;
 
-function parseLocalService(value: string): MuxSubscriberService {
+function parseLocalService(value: string): SubscriberService {
   const [id, port, ...extra] = value.split(":");
   if (!id || !port || extra.length > 0) {
     throw new Error("--service must use id:local-port");
@@ -78,8 +79,10 @@ export function parseDogfoodClientCliOptions(
 export async function startDogfoodClient(
   options: DogfoodClientOptions,
 ): Promise<RunningDogfoodClient> {
-  const running = await startMuxSubscriber({
-    stateDir: options.stateDir,
+  const running = await startSubscriber({
+    stateDir: path.resolve(
+      options.stateDir ?? path.join("tmp", "dogfood", "client"),
+    ),
     bootstrap:
       options.bootstrap ??
       (options.testBootstrapPort === undefined

@@ -8,7 +8,7 @@ import {
   connectionOptionsForRoute,
   parseRoute,
 } from "../src/mux/route.js";
-import { createPublisherConnection } from "../src/mux/subscriber.js";
+import { createPublisherConnection } from "../src/runtime/subscriber.js";
 
 class FakeDhtStream extends Duplex implements DhtStream {
   connected: boolean;

@@ -1,50 +1,47 @@
-import { readFile } from "node:fs/promises";
 import {
   createServer,
   type Server,
   type Socket,
 } from "node:net";
-import path from "node:path";
 import type { Duplex } from "node:stream";
 
-import { parseSubscriberContact } from "../config.js";
-import { parseClientIdentity } from "../keys.js";
 import {
   createDht,
   dhtStreamSnapshot,
   keyPairFromSecretKey,
   type DhtAddress,
   type DhtStream,
-} from "./hyperdht.js";
+} from "../mux/hyperdht.js";
 import {
   createObservationEmitter,
   createObservationId,
   type EmitObservation,
   type Observe,
-} from "./observability.js";
+} from "../mux/observability.js";
 import {
   connectionOptionsForRoute,
   type Route,
-} from "./route.js";
+} from "../mux/route.js";
 import {
   createMuxSubscriber,
   type RunningMuxSubscriber,
-} from "./transport.js";
+} from "../mux/transport.js";
+import { loadSubscriberState } from "../state/subscriber.js";
 
-export interface MuxSubscriberService {
+export interface SubscriberService {
   id: string;
   localPort: number;
 }
 
-export interface RunningMuxSubscriberService {
+export interface RunningSubscriberService {
   id: string;
   port: number;
 }
 
-export interface StartMuxSubscriberOptions {
-  stateDir?: string;
+export interface StartSubscriberOptions {
+  stateDir: string;
   bootstrap?: DhtAddress[];
-  services: MuxSubscriberService[];
+  services: SubscriberService[];
   log?: (line: string) => void;
   now?: () => number;
   observe?: Observe;
@@ -52,13 +49,29 @@ export interface StartMuxSubscriberOptions {
   sleep?: (delayMs: number) => Promise<void>;
 }
 
-export interface RunningMuxSubscriberDaemon {
+export type SubscriberConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "stopped";
+
+export interface SubscriberRuntimeStatus {
+  role: "subscriber";
+  state: "running" | "stopped";
+  connection: SubscriberConnectionStatus;
+  publisherKey: string;
+  homeUrl: string;
+  services: RunningSubscriberService[];
+}
+
+export interface RunningSubscriber {
   publisherKey: string;
   home: {
     port: number;
     url: string;
   };
-  services: RunningMuxSubscriberService[];
+  services: RunningSubscriberService[];
+  status: () => SubscriberRuntimeStatus;
   stop: () => Promise<void>;
 }
 
@@ -66,22 +79,10 @@ interface ServiceOpener {
   open: (serviceId: string) => Promise<Duplex>;
 }
 
-export async function startMuxSubscriber(
-  options: StartMuxSubscriberOptions,
-): Promise<RunningMuxSubscriberDaemon> {
-  const stateDir = path.resolve(
-    options.stateDir ?? path.join("tmp", "dogfood", "client"),
-  );
-  const identity = parseClientIdentity(
-    JSON.parse(
-      await readFile(path.join(stateDir, "client.identity.json"), "utf8"),
-    ) as unknown,
-  );
-  const contact = parseSubscriberContact(
-    JSON.parse(
-      await readFile(path.join(stateDir, "publisher.contact.json"), "utf8"),
-    ) as unknown,
-  );
+export async function startSubscriber(
+  options: StartSubscriberOptions,
+): Promise<RunningSubscriber> {
+  const { contact, identity } = await loadSubscriberState(options.stateDir);
   const keyPair = keyPairFromSecretKey(identity.secretKey);
   const dht = createDht({ bootstrap: options.bootstrap, keyPair });
   const now = options.now ?? Date.now;
@@ -110,7 +111,7 @@ export async function startMuxSubscriber(
       connection,
     );
     servers.push(homeServer.server);
-    const services: RunningMuxSubscriberService[] = [];
+    const services: RunningSubscriberService[] = [];
     for (const service of options.services) {
       const listener = await listenService(
         service.id,
@@ -133,6 +134,14 @@ export async function startMuxSubscriber(
         url: `http://127.0.0.1:${homeServer.port}`,
       },
       services,
+      status: () => ({
+        role: "subscriber",
+        state: stopped ? "stopped" : "running",
+        connection: connection.status(),
+        publisherKey: contact.publisherKey,
+        homeUrl: `http://127.0.0.1:${homeServer.port}`,
+        services: services.map((service) => ({ ...service })),
+      }),
       async stop(): Promise<void> {
         if (stopped) return;
         stopped = true;
@@ -207,6 +216,7 @@ export function createPublisherConnection(options: {
   sleep: (delayMs: number) => Promise<void>;
 }): ServiceOpener & {
   start: () => Promise<void>;
+  status: () => SubscriberConnectionStatus;
   stop: () => Promise<void>;
 } {
   let current:
@@ -381,6 +391,12 @@ export function createPublisherConnection(options: {
         }
       }
       throw new Error("Subscriber stopped");
+    },
+    status(): SubscriberConnectionStatus {
+      if (stopped) return "stopped";
+      if (current) return "connected";
+      if (reconnecting) return "reconnecting";
+      return "connecting";
     },
     async stop(): Promise<void> {
       if (stopped) return;

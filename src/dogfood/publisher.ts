@@ -2,18 +2,20 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  startMuxPublisher,
-  type RunningMuxPublisherDaemon,
-  type StartMuxPublisherOptions,
-} from "../mux/publisher.js";
+  startPublisher,
+  type RunningPublisher,
+  type StartPublisherOptions,
+} from "../runtime/publisher.js";
 import { parseTcpPort, takeOptionValue, waitForSignal } from "./cli.js";
 
-export interface DogfoodPublisherOptions extends StartMuxPublisherOptions {
+export interface DogfoodPublisherOptions
+  extends Omit<StartPublisherOptions, "stateDir"> {
+  stateDir?: string;
   testBootstrapPort?: number;
 }
 
 export interface RunningDogfoodPublisher
-  extends RunningMuxPublisherDaemon {
+  extends RunningPublisher {
   waitForExit: () => Promise<void>;
 }
 
@@ -47,8 +49,10 @@ export function parseDogfoodPublisherCliOptions(
 export async function startDogfoodPublisher(
   options: DogfoodPublisherOptions = {},
 ): Promise<RunningDogfoodPublisher> {
-  const running = await startMuxPublisher({
-    stateDir: options.stateDir,
+  const running = await startPublisher({
+    stateDir: path.resolve(
+      options.stateDir ?? path.join("tmp", "dogfood", "publisher"),
+    ),
     bootstrap:
       options.bootstrap ??
       (options.testBootstrapPort === undefined
