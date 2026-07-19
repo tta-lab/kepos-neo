@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import type { DhtAddress } from "../mux/hyperdht.js";
 import { parseRoute, type Route } from "../mux/route.js";
 import type { PublisherStateService } from "../state/publisher.js";
 import type { SubscriberService } from "../runtime/subscriber.js";
@@ -88,6 +89,23 @@ export function parseSubscriberService(value: string): SubscriberService {
 
 export function parseRouteOption(options: ParsedOptions): Route {
   return parseRoute(singleOption(options, "--route") ?? "auto");
+}
+
+export function parseBootstrapOptions(
+  options: ParsedOptions,
+): DhtAddress[] | undefined {
+  const values = repeatedOption(options, "--bootstrap");
+  if (values.length === 0) return undefined;
+  return values.map((value) => {
+    const [host, port, ...extra] = value.split(":");
+    if (!host || !port || extra.length > 0) {
+      throw new Error("--bootstrap must use host:port");
+    }
+    return {
+      host,
+      port: parseTcpPort(port, "--bootstrap port"),
+    };
+  });
 }
 
 export function observationMode(

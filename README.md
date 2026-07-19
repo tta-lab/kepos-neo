@@ -52,6 +52,20 @@ npm run kepos -- subscriber set-publisher \
   --publisher-key <publisher-key>
 ```
 
+Both run commands accept repeated `--bootstrap host:port` options. Omitting
+them retains HyperDHT's built-in bootstrap set. An explicit list replaces that
+set:
+
+```sh
+npm run kepos -- subscriber run \
+  --state ~/.local/state/kepos-neo/subscriber \
+  --bootstrap 47.94.213.63:49737 \
+  --bootstrap 203.91.75.19:49738
+```
+
+Bootstrap nodes only help the process enter the public DHT. They do not relay
+the established stream, grant access, or change the pinned publisher key.
+
 Open Home and any configured TCP services together:
 
 ```sh

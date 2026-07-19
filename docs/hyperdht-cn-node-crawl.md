@@ -111,3 +111,60 @@ An empty recommendation list before the second cross-time validation is
 expected. Kepos clients must retain built-in fallback endpoints and their last
 valid signed list; this artifact must not become a required single point of
 failure.
+
+## Benchmark cold bootstrap choices
+
+The benchmark alternates four bootstrap groups while keeping the client
+network and publisher fixed:
+
+1. HyperDHT's built-in bootstrap set;
+2. recommended mainland China and Hong Kong endpoints;
+3. recommended mainland China, Hong Kong, and Singapore endpoints;
+4. every recommendation followed by HyperDHT's built-in endpoints.
+
+Each trial starts a fresh Node process and a fresh HyperDHT instance. It first
+measures `fullyBootstrapped()`, then opens a stream to one pinned publisher
+with `localConnection: false`. `outerMs` is measured from process-local DHT
+creation through the first stream `open`; `connectMs` is the part after
+bootstrap. The publisher remains running between trials, which models the
+planned persistent publisher and isolates subscriber cold start.
+
+```sh
+npm run benchmark:bootstrap -- \
+  --recommendations ~/.local/state/kepos-neo/dht-graph/bootstrap-recommendations.json \
+  --identity ~/.local/state/kepos-neo/subscriber/client.identity.json \
+  --publisher-key <publisher-key> \
+  --output ~/.local/state/kepos-neo/bootstrap-benchmark \
+  --trials 25 \
+  --timeout-ms 30000
+```
+
+The command writes every completed trial to `results.jsonl` before starting
+the next process, then writes group percentiles and failure rates to
+`summary.json`.
+
+### 2026-07-19 Mac-to-NUC sample
+
+The Mac client and persistent NUC publisher stayed on the same network for all
+100 alternating trials. The benchmark disabled HyperDHT's LAN shortcut, so
+the measured stream used the public DHT/hole-punch path. Each group ran 25
+fresh subscriber processes.
+
+| Bootstrap group | Bootstrap p50 | Bootstrap p90 | Outer p50 | Outer p90 | Outer failures |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Built-in default | 8,101 ms | 10,141 ms | 11,885 ms | 14,426 ms | 6/25 (24%) |
+| CN + HK | 5,064 ms | 6,875 ms | 7,654 ms | 11,313 ms | 3/25 (12%) |
+| CN + HK + SG | 5,612 ms | 7,664 ms | 7,837 ms | 12,344 ms | 1/25 (4%) |
+| Recommendations + default | 7,563 ms | 10,111 ms | 11,691 ms | 14,366 ms | 3/25 (12%) |
+
+Against the built-in set, CN + HK reduced bootstrap p50 by 37.5% and cold
+outer p50 by 35.6%. CN + HK + SG reduced them by 30.7% and 34.1% and had the
+lowest observed outer failure rate. All failed outer attempts ended with
+`HOLEPUNCH_ABORTED`; no trial failed to bootstrap. Successful post-bootstrap
+connect p50 stayed near 2.1–2.4 seconds in every group.
+
+The result supports an ordered regional bootstrap policy, not concatenating
+every known endpoint. More initial nodes did not make startup faster. This is
+one network and one publisher, so it does not prove the same failure-rate
+difference across Chinese carriers; repeat the same alternating experiment
+from other networks before making a global default.

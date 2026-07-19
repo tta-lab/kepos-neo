@@ -225,11 +225,29 @@ test("publisher set commands replace allowlist and services", async () => {
 test("publisher run prints human status and awaits signal-safe stop", async () => {
   const cli = fakeCli();
   await runCli(
-    ["publisher", "run", "--state", "./publisher"],
+    [
+      "publisher",
+      "run",
+      "--state",
+      "./publisher",
+      "--bootstrap",
+      "47.94.213.63:49737",
+      "--bootstrap",
+      "203.91.75.19:49738",
+    ],
     cli.dependencies,
   );
 
   assert.equal(cli.calls.startPublisher.length, 1);
+  const [options] = cli.calls.startPublisher as Array<{
+    stateDir: string;
+    bootstrap: Array<{ host: string; port: number }>;
+  }>;
+  assert.equal(options.stateDir, path.resolve("./publisher"));
+  assert.deepEqual(options.bootstrap, [
+    { host: "47.94.213.63", port: 49737 },
+    { host: "203.91.75.19", port: 49738 },
+  ]);
   assert.deepEqual(cli.calls.stopped, ["publisher"]);
   assert.match(cli.stdout.join("\n"), /Publisher running/);
   assert.match(cli.stdout.join("\n"), /outer\.connected/);
@@ -248,6 +266,8 @@ test("subscriber run maps services and writes NDJSON observations", async () => 
       "ssh:2222",
       "--route",
       "public",
+      "--bootstrap",
+      "34.143.181.65:49738",
       "--observations",
       "ndjson",
     ],
@@ -258,14 +278,53 @@ test("subscriber run maps services and writes NDJSON observations", async () => 
     stateDir: string;
     services: Array<{ id: string; localPort: number }>;
     route: string;
+    bootstrap: Array<{ host: string; port: number }>;
   }>;
   assert.equal(options.stateDir, path.resolve("./subscriber"));
   assert.deepEqual(options.services, [{ id: "ssh", localPort: 2222 }]);
   assert.equal(options.route, "public");
+  assert.deepEqual(options.bootstrap, [
+    { host: "34.143.181.65", port: 49738 },
+  ]);
   assert.deepEqual(cli.calls.stopped, ["subscriber"]);
   assert.equal(cli.stdout.length, 1);
   assert.equal(JSON.parse(cli.stdout[0] ?? "").event, "outer.connected");
   assert.match(cli.stderr.join("\n"), /Subscriber running/);
+});
+
+test("run commands reject malformed bootstrap endpoints", async () => {
+  const cli = fakeCli();
+
+  await assert.rejects(
+    () =>
+      runCli(
+        [
+          "subscriber",
+          "run",
+          "--state",
+          "./subscriber",
+          "--bootstrap",
+          "47.94.213.63",
+        ],
+        cli.dependencies,
+      ),
+    /bootstrap.*host:port/i,
+  );
+  await assert.rejects(
+    () =>
+      runCli(
+        [
+          "publisher",
+          "run",
+          "--state",
+          "./publisher",
+          "--bootstrap",
+          "47.94.213.63:70000",
+        ],
+        cli.dependencies,
+      ),
+    /bootstrap.*port/i,
+  );
 });
 
 test("canonical commands require explicit state and reject standalone status", async () => {

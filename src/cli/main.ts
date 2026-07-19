@@ -33,6 +33,7 @@ import {
 } from "../state/subscriber.js";
 import {
   observationMode,
+  parseBootstrapOptions,
   parseOptions,
   parsePublisherService,
   parseRouteOption,
@@ -224,10 +225,12 @@ async function runPublisherCommand(
   const options = parseOptions(arguments_, [
     "--state",
     "--observations",
+    "--bootstrap",
   ]);
   const mode = observationMode(options);
   const running = await dependencies.startPublisher({
     stateDir: requiredState(options),
+    bootstrap: parseBootstrapOptions(options),
     observe: observationWriter(mode, dependencies),
   });
   statusWriter(mode, dependencies)(
@@ -245,6 +248,7 @@ async function runSubscriberCommand(
     "--service",
     "--route",
     "--observations",
+    "--bootstrap",
   ]);
   const mode = observationMode(options);
   const services = repeatedOption(options, "--service").map(
@@ -255,6 +259,7 @@ async function runSubscriberCommand(
   }
   const running = await dependencies.startSubscriber({
     stateDir: requiredState(options),
+    bootstrap: parseBootstrapOptions(options),
     services,
     route: parseRouteOption(options),
     observe: observationWriter(mode, dependencies),
