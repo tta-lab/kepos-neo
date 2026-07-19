@@ -70,6 +70,15 @@ hour. Stability thresholds are report-only parameters: they never alter or
 filter raw snapshot data, so the same crawl can be reprocessed with different
 definitions.
 
+When `bootstrap-recommendations.json` exists in the input directory, the report
+also reads its validated endpoints. Ordinary observations remain translucent
+blue, discovery-stable endpoints are green, and recommended bootstrap endpoints
+are drawn last as larger amber diamonds. Recommendation and discovery stability
+are separate states. The country chart includes every observed country and
+overlays the same amber recommendation count, so low-count regions such as CN
+are not hidden by a top-N cutoff. Use `--recommendations <path>` to read a
+recommendation artifact from another location.
+
 ## Validate bootstrap candidates
 
 The validator is a separate stage. It reads verified responders from graph

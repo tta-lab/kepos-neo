@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { test } from "node:test";
 
 import {
@@ -12,6 +14,7 @@ import {
   observationBucket,
   parseObservationJsonl,
   readInputObservations,
+  readReportRecommendations,
   renderReportHtml,
   type GeoRecord,
 } from "../src/tools/dht-report.js";
@@ -19,6 +22,25 @@ import type {
   NodeObservation,
   NodeSummary,
 } from "../src/tools/dht-crawler.js";
+
+const execFileAsync = promisify(execFile);
+
+const reportRecommendation = {
+  endpoint: "1.0.1.42:49737",
+  discoverySnapshots: 3,
+  successfulValidations: 2,
+  validationSpanHours: 12,
+  minimumRttMs: 42,
+};
+
+const signedRecommendationArtifact = {
+  algorithm: "Ed25519",
+  payload: {
+    generatedAt: "2026-07-19T02:25:50.920Z",
+    endpoints: [reportRecommendation],
+  },
+  signature: "signed",
+};
 
 const summaries: NodeSummary[] = [
   {
@@ -105,6 +127,7 @@ test("builds geographic, country, ASN, and hourly report data", () => {
     endpoints: 2,
     locatedEndpoints: 2,
     stableEndpoints: 1,
+    recommendedEndpoints: 0,
     countries: 2,
   });
   assert.deepEqual(
@@ -121,6 +144,7 @@ test("builds geographic, country, ASN, and hourly report data", () => {
       label: "China (CN)",
       endpoints: 1,
       stableEndpoints: 1,
+      recommendedEndpoints: 0,
     },
     {
       countryCode: "US",
@@ -128,6 +152,7 @@ test("builds geographic, country, ASN, and hourly report data", () => {
       label: "United States (US)",
       endpoints: 1,
       stableEndpoints: 0,
+      recommendedEndpoints: 0,
     },
   ]);
   assert.deepEqual(model.asns[0], {
@@ -142,6 +167,28 @@ test("builds geographic, country, ASN, and hourly report data", () => {
     { hour: "2026-07-18T12:00:00.000Z", observations: 1, endpoints: 1 },
     { hour: "2026-07-19T12:00:00.000Z", observations: 1, endpoints: 1 },
   ]);
+});
+
+test("keeps validated recommendations separate from discovery stability", () => {
+  const model = buildReportModel(
+    observations,
+    summaries,
+    geos,
+    {
+      minimumSpanHours: 48,
+      minimumObservations: 20,
+      minimumDistinctBuckets: 4,
+      maximumStaleHours: 2,
+    },
+    [reportRecommendation],
+  );
+
+  assert.equal(model.points[0].stable, false);
+  assert.equal(model.points[0].recommended, true);
+  assert.equal(model.points[1].recommended, false);
+  assert.equal(model.totals.stableEndpoints, 0);
+  assert.equal(model.totals.recommendedEndpoints, 1);
+  assert.equal(model.countries[0].recommendedEndpoints, 1);
 });
 
 test("enrichment reuses cache and fetches only missing public hosts", async () => {
@@ -168,6 +215,22 @@ test("renders a self-contained data report without script injection", () => {
   assert.match(html, /China Telecom/);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /\\u003cscript>alert\(1\)\\u003c\/script>/);
+});
+
+test("renders validated recommendations as prominent map markers", () => {
+  const model = buildReportModel(
+    observations,
+    summaries,
+    geos,
+    undefined,
+    [reportRecommendation],
+  );
+  const html = renderReportHtml(model);
+
+  assert.match(html, /Recommended bootstrap/);
+  assert.match(html, /#ffb547/);
+  assert.match(html, /symbol: "diamond"/);
+  assert.doesNotMatch(html, /report\.countries\.slice\(0, 20\)/);
 });
 
 test("ignores a partial final JSONL record while the crawler is writing", () => {
@@ -275,6 +338,93 @@ test("reads observations from all graph snapshots in timestamp order", async () 
       loaded.map(({ snapshot }) => snapshot),
       ["first", "second"],
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reads validated endpoints from the signed recommendation artifact", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-dht-report-"));
+  try {
+    const recommendationPath = path.join(
+      root,
+      "bootstrap-recommendations.json",
+    );
+    await writeFile(
+      recommendationPath,
+      JSON.stringify(signedRecommendationArtifact),
+    );
+    assert.deepEqual(await readReportRecommendations(recommendationPath), [
+      reportRecommendation,
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("treats a missing recommendation artifact as no recommendations", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-dht-report-"));
+  try {
+    assert.deepEqual(
+      await readReportRecommendations(
+        path.join(root, "bootstrap-recommendations.json"),
+      ),
+      [],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a malformed recommendation artifact with its path", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-dht-report-"));
+  try {
+    const recommendationPath = path.join(
+      root,
+      "bootstrap-recommendations.json",
+    );
+    await writeFile(recommendationPath, "{broken");
+
+    await assert.rejects(
+      readReportRecommendations(recommendationPath),
+      new RegExp(`Invalid recommendation artifact: ${recommendationPath}`),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the report CLI includes recommendations from the input directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-dht-report-"));
+  try {
+    await writeFile(
+      path.join(root, "observations.jsonl"),
+      `${JSON.stringify(observations[0])}\n`,
+    );
+    await writeFile(
+      path.join(root, "geo-cache.json"),
+      JSON.stringify([geos.get("1.0.1.42")]),
+    );
+    await writeFile(
+      path.join(root, "bootstrap-recommendations.json"),
+      JSON.stringify(signedRecommendationArtifact),
+    );
+
+    await execFileAsync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        path.resolve("src/tools/dht-report.ts"),
+        "--input",
+        root,
+      ],
+      { cwd: path.resolve(".") },
+    );
+
+    const html = await readFile(path.join(root, "report.html"), "utf8");
+    assert.match(html, /"recommendedEndpoints":1/);
+    assert.match(html, /"recommended":true/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

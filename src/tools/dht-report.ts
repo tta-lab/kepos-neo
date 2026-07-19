@@ -27,6 +27,14 @@ export interface StabilityCriteria {
   maximumStaleHours: number;
 }
 
+export interface ReportRecommendation {
+  endpoint: string;
+  discoverySnapshots: number;
+  successfulValidations: number;
+  validationSpanHours: number;
+  minimumRttMs: number | null;
+}
+
 export const DEFAULT_STABILITY_CRITERIA: StabilityCriteria = {
   minimumSpanHours: 24,
   minimumObservations: 6,
@@ -39,6 +47,8 @@ interface ReportPoint extends GeoRecord, NodeSummary {
   distinctBuckets: number;
   staleHours: number;
   stable: boolean;
+  recommended: boolean;
+  recommendation: ReportRecommendation | null;
 }
 
 interface CountrySummary {
@@ -47,6 +57,7 @@ interface CountrySummary {
   label: string;
   endpoints: number;
   stableEndpoints: number;
+  recommendedEndpoints: number;
 }
 
 interface AsnSummary {
@@ -70,6 +81,7 @@ interface ReportModel {
     endpoints: number;
     locatedEndpoints: number;
     stableEndpoints: number;
+    recommendedEndpoints: number;
     countries: number;
   };
   points: ReportPoint[];
@@ -89,6 +101,7 @@ interface ReportOptions {
   inputDir: string;
   outputPath: string;
   cachePath: string;
+  recommendationsPath: string;
   stabilityCriteria: StabilityCriteria;
 }
 
@@ -97,6 +110,7 @@ export function buildReportModel(
   summaries: NodeSummary[],
   geos: Map<string, GeoRecord>,
   stabilityCriteria: StabilityCriteria = DEFAULT_STABILITY_CRITERIA,
+  recommendations: ReportRecommendation[] = [],
 ): ReportModel {
   const latestObservation = observations.reduce(
     (latest, observation) =>
@@ -104,6 +118,12 @@ export function buildReportModel(
     "",
   );
   const observationsByEndpoint = groupObservationsByEndpoint(observations);
+  const recommendationsByEndpoint = new Map(
+    recommendations.map((recommendation) => [
+      recommendation.endpoint,
+      recommendation,
+    ]),
+  );
   const points = summaries.flatMap((summary): ReportPoint[] => {
     const geo = geos.get(summary.host);
     if (!geo) {
@@ -118,6 +138,8 @@ export function buildReportModel(
     const staleHours =
       (Date.parse(latestObservation) - Date.parse(summary.lastSeen)) /
       (60 * 60 * 1_000);
+    const recommendation =
+      recommendationsByEndpoint.get(summary.endpoint) ?? null;
     return [
       {
         ...geo,
@@ -125,6 +147,8 @@ export function buildReportModel(
         spanHours,
         distinctBuckets,
         staleHours,
+        recommended: recommendation !== null,
+        recommendation,
         stable: isStableCandidate(
           summary,
           endpointObservations,
@@ -145,6 +169,8 @@ export function buildReportModel(
       endpoints: summaries.length,
       locatedEndpoints: points.length,
       stableEndpoints: points.filter(({ stable }) => stable).length,
+      recommendedEndpoints: points.filter(({ recommended }) => recommended)
+        .length,
       countries: countries.length,
     },
     points,
@@ -258,6 +284,7 @@ export function renderReportHtml(model: ReportModel): string {
       ["Endpoints", report.totals.endpoints],
       ["Located", report.totals.locatedEndpoints],
       ["Stable", report.totals.stableEndpoints],
+      ["Recommended", report.totals.recommendedEndpoints],
       ["Countries", report.totals.countries],
     ];
     document.querySelector("#cards").innerHTML = cards
@@ -265,11 +292,13 @@ export function renderReportHtml(model: ReportModel): string {
       .join("");
 
     const pointTrace = (stable) => {
-      const points = report.points.filter((point) => point.stable === stable);
+      const points = report.points.filter((point) =>
+        point.stable === stable && !point.recommended
+      );
       return {
         type: "scattergeo",
         mode: "markers",
-        name: stable ? "Stable ≥24h" : "Observed",
+        name: stable ? "Discovery stable" : "Observed",
         lat: points.map((point) => point.latitude),
         lon: points.map((point) => point.longitude),
         text: points.map((point) =>
@@ -284,7 +313,26 @@ export function renderReportHtml(model: ReportModel): string {
         },
       };
     };
-    Plotly.newPlot("map", [pointTrace(false), pointTrace(true)], {
+    const recommendedPoints = report.points.filter((point) => point.recommended);
+    const recommendationTrace = {
+      type: "scattergeo",
+      mode: "markers",
+      name: "Recommended bootstrap",
+      lat: recommendedPoints.map((point) => point.latitude),
+      lon: recommendedPoints.map((point) => point.longitude),
+      text: recommendedPoints.map((point) =>
+        \`\${point.endpoint}<br>\${point.city}, \${point.country}<br>AS\${point.asn ?? "?"} \${point.organization}<br>Recommended bootstrap · \${point.recommendation.successfulValidations} validations over \${point.recommendation.validationSpanHours.toFixed(1)}h · \${point.recommendation.discoverySnapshots} discovery snapshots · \${point.recommendation.minimumRttMs ?? "?"}ms minimum RTT<br>Discovery stable: \${point.stable ? "yes" : "no"}\`
+      ),
+      hoverinfo: "text",
+      marker: {
+        color: "#ffb547",
+        opacity: 1,
+        size: 16,
+        symbol: "diamond",
+        line: { color: "#fff2d0", width: 1.5 },
+      },
+    };
+    Plotly.newPlot("map", [pointTrace(false), pointTrace(true), recommendationTrace], {
       ...plot,
       title: "Observed endpoints",
       margin: { l: 0, r: 0, t: 48, b: 0 },
@@ -300,26 +348,35 @@ export function renderReportHtml(model: ReportModel): string {
       },
     }, { responsive: true });
 
-    const topCountries = report.countries.slice(0, 20).reverse();
+    const countries = report.countries.slice().reverse();
     Plotly.newPlot("countries", [{
       type: "bar",
       orientation: "h",
-      y: topCountries.map((row) => row.label),
-      x: topCountries.map((row) => row.endpoints),
-      customdata: topCountries.map((row) => [row.country, row.countryCode, row.stableEndpoints]),
-      hovertemplate: "%{customdata[0]} (%{customdata[1]})<br>%{x} endpoints<br>%{customdata[2]} stable<extra></extra>",
+      y: countries.map((row) => row.label),
+      x: countries.map((row) => row.endpoints),
+      customdata: countries.map((row) => [row.country, row.countryCode, row.stableEndpoints, row.recommendedEndpoints]),
+      hovertemplate: "%{customdata[0]} (%{customdata[1]})<br>%{x} endpoints<br>%{customdata[2]} stable<br>%{customdata[3]} recommended<extra></extra>",
       marker: { color: "#6fa8ff" },
       name: "Endpoints",
     }, {
       type: "bar",
       orientation: "h",
-      y: topCountries.map((row) => row.label),
-      x: topCountries.map((row) => row.stableEndpoints),
-      customdata: topCountries.map((row) => [row.country, row.countryCode, row.endpoints]),
+      y: countries.map((row) => row.label),
+      x: countries.map((row) => row.stableEndpoints),
+      customdata: countries.map((row) => [row.country, row.countryCode, row.endpoints]),
       hovertemplate: "%{customdata[0]} (%{customdata[1]})<br>%{x} stable endpoints<br>%{customdata[2]} total<extra></extra>",
       marker: { color: "#53e6a1" },
       name: "Stable",
-    }], { ...plot, title: "Top countries", barmode: "overlay", margin: { l: 140, r: 20, t: 48, b: 40 } }, { responsive: true });
+    }, {
+      type: "bar",
+      orientation: "h",
+      y: countries.map((row) => row.label),
+      x: countries.map((row) => row.recommendedEndpoints),
+      customdata: countries.map((row) => [row.country, row.countryCode, row.endpoints]),
+      hovertemplate: "%{customdata[0]} (%{customdata[1]})<br>%{x} recommended bootstrap endpoints<br>%{customdata[2]} total<extra></extra>",
+      marker: { color: "#ffb547" },
+      name: "Recommended",
+    }], { ...plot, title: "Countries", height: Math.max(360, countries.length * 24), barmode: "overlay", margin: { l: 140, r: 20, t: 48, b: 40 } }, { responsive: true });
 
     const topAsns = report.asns.slice(0, 15).reverse();
     Plotly.newPlot("asns", [{
@@ -346,7 +403,13 @@ export function renderReportHtml(model: ReportModel): string {
       y: report.points.map((point) => point.observations),
       text: report.points.map((point) => point.endpoint),
       hoverinfo: "text+x+y",
-      marker: { color: report.points.map((point) => point.stable ? "#53e6a1" : "#6fa8ff"), opacity: 0.65 },
+      marker: {
+        color: report.points.map((point) =>
+          point.recommended ? "#ffb547" : point.stable ? "#53e6a1" : "#6fa8ff"
+        ),
+        symbol: report.points.map((point) => point.recommended ? "diamond" : "circle"),
+        opacity: 0.65,
+      },
     }], {
       ...plot,
       title: "Stability",
@@ -382,10 +445,45 @@ export function parseObservationJsonl(input: string): NodeObservation[] {
   return observations;
 }
 
+export async function readReportRecommendations(
+  filePath: string,
+): Promise<ReportRecommendation[]> {
+  let input: string;
+  try {
+    input = await readFile(filePath, "utf8");
+  } catch (error) {
+    if (isErrorCode(error, "ENOENT")) {
+      return [];
+    }
+    throw error;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(input) as unknown;
+  } catch {
+    throw new Error(`Invalid recommendation artifact: ${filePath}`);
+  }
+  if (
+    !isRecord(value) ||
+    value.algorithm !== "Ed25519" ||
+    typeof value.signature !== "string" ||
+    !isRecord(value.payload) ||
+    !Array.isArray(value.payload.endpoints)
+  ) {
+    throw new Error(`Invalid recommendation artifact: ${filePath}`);
+  }
+  return value.payload.endpoints.map((endpoint) =>
+    parseReportRecommendation(endpoint, filePath),
+  );
+}
+
 async function runReport(options: ReportOptions): Promise<void> {
   const observations = await readInputObservations(options.inputDir);
   const summaries = summarizeObservations(observations);
   const geos = await readGeoCache(options.cachePath);
+  const recommendations = await readReportRecommendations(
+    options.recommendationsPath,
+  );
 
   if (options.enrich) {
     console.log(`Enriching ${new Set(summaries.map(({ host }) => host)).size} hosts`);
@@ -405,6 +503,7 @@ async function runReport(options: ReportOptions): Promise<void> {
     summaries,
     geos,
     options.stabilityCriteria,
+    recommendations,
   );
   await writeFile(options.outputPath, renderReportHtml(model), "utf8");
   console.log(
@@ -421,9 +520,11 @@ function aggregateCountries(points: ReportPoint[]): CountrySummary[] {
       label: formatCountryLabel(point),
       endpoints: 0,
       stableEndpoints: 0,
+      recommendedEndpoints: 0,
     };
     current.endpoints += 1;
     current.stableEndpoints += point.stable ? 1 : 0;
+    current.recommendedEndpoints += point.recommended ? 1 : 0;
     countries.set(point.countryCode, current);
   }
   return [...countries.values()].sort(compareAggregates);
@@ -499,6 +600,44 @@ function groupObservationsByEndpoint(
 
 function observationBuckets(observations: NodeObservation[]): Set<string> {
   return new Set(observations.map(observationBucket));
+}
+
+function parseReportRecommendation(
+  value: unknown,
+  filePath: string,
+): ReportRecommendation {
+  if (
+    !isRecord(value) ||
+    typeof value.endpoint !== "string" ||
+    typeof value.discoverySnapshots !== "number" ||
+    typeof value.successfulValidations !== "number" ||
+    typeof value.validationSpanHours !== "number" ||
+    !(
+      value.minimumRttMs === null ||
+      typeof value.minimumRttMs === "number"
+    )
+  ) {
+    throw new Error(`Invalid recommendation endpoint in: ${filePath}`);
+  }
+  return {
+    endpoint: value.endpoint,
+    discoverySnapshots: value.discoverySnapshots,
+    successfulValidations: value.successfulValidations,
+    validationSpanHours: value.validationSpanHours,
+    minimumRttMs: value.minimumRttMs,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isErrorCode(error: unknown, code: string): boolean {
+  return (
+    isRecord(error) &&
+    "code" in error &&
+    error.code === code
+  );
 }
 
 async function fetchGeoRecord(host: string): Promise<GeoRecord | null> {
@@ -638,6 +777,10 @@ function parseOptions(argv: string[]): ReportOptions {
     ),
     cachePath: path.resolve(
       values.get("--geo-cache") ?? path.join(inputDir, "geo-cache.json"),
+    ),
+    recommendationsPath: path.resolve(
+      values.get("--recommendations") ??
+        path.join(inputDir, "bootstrap-recommendations.json"),
     ),
     stabilityCriteria: {
       minimumSpanHours: positiveNumber(
