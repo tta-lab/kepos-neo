@@ -54,39 +54,22 @@ test("production runtime has no P0, dogfood, or Hypertele path", async () => {
   }
 });
 
-test("dogfood publisher unit requires separately initialized multiplex state", async () => {
-  const service = await readFile(
-    "deploy/kepos-dogfood-publisher.service",
-    "utf8",
+test("host owns process supervision and subscriber ports stay explicit", async () => {
+  await assert.rejects(
+    () => access("deploy/kepos-dogfood-publisher.service"),
+    (error: unknown) =>
+      (error as NodeJS.ErrnoException).code === "ENOENT",
   );
-  const evidence = await readFile(
-    "docs/evidence/mac-kosmos-ssh-dogfood.md",
-    "utf8",
-  );
-  const stateDir = "/home/neil/.local/state/kepos-neo/mux-publisher";
 
-  assert.match(
-    service,
-    new RegExp(
-      `ConditionPathExists=${stateDir}/publisher\\.manifest\\.json`,
-    ),
+  const decision = await readFile(
+    "docs/adr/0001-host-owned-supervision-and-explicit-local-ports.md",
+    "utf8",
   );
-  assert.match(
-    service,
-    new RegExp(`ConditionPathExists=${stateDir}/publisher\\.json`),
-  );
-  assert.match(
-    service,
-    new RegExp(
-      `ExecStart=.*npm run kepos -- publisher run --state ${stateDir}`,
-    ),
-  );
-  assert.doesNotMatch(service, /dogfood:publisher/);
-  assert.match(
-    evidence,
-    /setup publisher[\s\S]*--state ~\/\.local\/state\/kepos-neo\/mux-publisher/,
-  );
-  assert.match(evidence, /legacy state.*not compatible/i);
+  assert.match(decision, /Status:\s*Accepted/i);
+  assert.match(decision, /host.*owns.*process supervision/is);
+  assert.match(decision, /SSH.*explicit.*local port/is);
+  assert.match(decision, /2222.*convention.*not.*guarantee/is);
+  assert.match(decision, /subscriber.*actual.*port.*copy command/is);
 });
 
 test("network research tools live outside the Kepos product repository", async () => {
