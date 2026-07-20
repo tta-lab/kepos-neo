@@ -11,11 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test",
     "build:home": "tailwindcss -i home/styles.input.css -o home/styles.css --minify",
-    "kepos": "tsx src/cli/main.ts",
-    "crawl:dht": "tsx src/tools/dht-crawler.ts",
-    "report:dht": "tsx src/tools/dht-report.ts",
-    "validate:dht": "tsx src/tools/dht-validator.ts",
-    "benchmark:bootstrap": "tsx src/tools/bootstrap-benchmark-cli.ts"
+    "kepos": "tsx src/cli/main.ts"
   },
   "dependencies": {
     "compact-encoding": "^3.3.0",

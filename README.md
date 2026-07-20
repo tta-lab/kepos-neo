@@ -66,6 +66,12 @@ npm run kepos -- subscriber run \
 Bootstrap nodes only help the process enter the public DHT. They do not relay
 the established stream, grant access, or change the pinned publisher key.
 
+HyperDHT crawling, geographic reports, candidate validation, and regional
+bootstrap benchmarks live in
+[`tta-lab/hyperdht-observatory`](https://github.com/tta-lab/hyperdht-observatory).
+Kepos does not fetch or trust Observatory output at runtime; operators review
+and pass any chosen endpoints explicitly with `--bootstrap`.
+
 Run one local HTTP gateway plus any raw TCP listeners:
 
 ```sh

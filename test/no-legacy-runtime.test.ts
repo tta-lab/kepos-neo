@@ -53,3 +53,32 @@ test("production runtime has no P0, dogfood, or Hypertele path", async () => {
     assert.doesNotMatch(source, /hypertele|src\/p0|src\/dogfood/iu, filePath);
   }
 });
+
+test("network research tools live outside the Kepos product repository", async () => {
+  for (const extractedPath of [
+    "src/tools",
+    "test/bootstrap-benchmark.test.ts",
+    "test/dht-crawler.test.ts",
+    "test/dht-report.test.ts",
+    "test/dht-validator.test.ts",
+  ]) {
+    await assert.rejects(
+      () => access(extractedPath),
+      (error: unknown) =>
+        (error as NodeJS.ErrnoException).code === "ENOENT",
+      extractedPath,
+    );
+  }
+
+  const packageJson = JSON.parse(
+    await readFile("package.json", "utf8"),
+  ) as { scripts?: Record<string, string> };
+  for (const script of [
+    "crawl:dht",
+    "report:dht",
+    "validate:dht",
+    "benchmark:bootstrap",
+  ]) {
+    assert.equal(packageJson.scripts?.[script], undefined, script);
+  }
+});
