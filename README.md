@@ -1,5 +1,8 @@
 # Kepos Neo
 
+[![CI](https://github.com/tta-lab/kepos-neo/actions/workflows/check.yml/badge.svg?branch=main&event=push)](https://github.com/tta-lab/kepos-neo/actions/workflows/check.yml)
+[![codecov](https://codecov.io/github/tta-lab/kepos-neo/graph/badge.svg?branch=main)](https://app.codecov.io/github/tta-lab/kepos-neo)
+
 Kepos Neo exposes a publisher's local Home page and configured TCP services to
 allowlisted subscribers. One persistent encrypted HyperDHT connection carries
 independent Protomux channels for Home, SSH, Navidrome, and other services.
