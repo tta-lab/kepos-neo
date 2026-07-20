@@ -1,4 +1,4 @@
-lefthook: npm exec -- lefthook
+lefthook: npm exec --offline -- lefthook
 
 pre-commit:
   commands:
