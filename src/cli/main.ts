@@ -108,10 +108,31 @@ export function createDefaultCliDependencies(
 
 const defaultDependencies = createDefaultCliDependencies();
 
+const CLI_USAGE = [
+  "Usage: kepos <command> [options]",
+  "",
+  "Commands:",
+  "  setup publisher",
+  "  setup subscriber",
+  "  publisher set-allow",
+  "  publisher set-services",
+  "  publisher run",
+  "  subscriber set-publisher",
+  "  subscriber run",
+].join("\n");
+
 export async function runCli(
   arguments_: readonly string[],
   dependencies: CliDependencies = defaultDependencies,
 ): Promise<void> {
+  if (
+    arguments_.length === 0 ||
+    arguments_.includes("--help") ||
+    arguments_.includes("-h")
+  ) {
+    dependencies.stdout(CLI_USAGE);
+    return;
+  }
   const [group, action, ...rest] = arguments_;
   if (group === "setup" && action === "publisher") {
     await setupPublisherCommand(rest, dependencies);
@@ -141,7 +162,9 @@ export async function runCli(
     await runSubscriberCommand(rest, dependencies);
     return;
   }
-  throw new Error(`unknown command: ${arguments_.join(" ") || "(none)"}`);
+  throw new Error(
+    `unknown command: ${arguments_.join(" ")}\n\n${CLI_USAGE}`,
+  );
 }
 
 async function setupPublisherCommand(

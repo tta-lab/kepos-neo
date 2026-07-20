@@ -210,6 +210,7 @@ async function openAndBridge(
 
 export function createPublisherConnection(options: {
   connect: () => DhtStream;
+  createMuxSubscriber?: typeof createMuxSubscriber;
   log?: (line: string) => void;
   now: () => number;
   observe?: Observe;
@@ -300,7 +301,7 @@ export function createPublisherConnection(options: {
         observe,
         mux: install(
           outer,
-          createMuxSubscriber(outer, {
+          (options.createMuxSubscriber ?? createMuxSubscriber)(outer, {
             outerId,
             now: options.now,
             observe: options.observe,
@@ -390,6 +391,7 @@ export function createPublisherConnection(options: {
           ) {
             throw error;
           }
+          await options.sleep(10);
         }
       }
       throw new Error("Subscriber stopped");

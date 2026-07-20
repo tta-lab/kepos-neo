@@ -343,6 +343,26 @@ test("canonical commands require explicit state and reject standalone status", a
   );
 });
 
+test("empty arguments and help print CLI usage", async () => {
+  const empty = fakeCli();
+  const help = fakeCli();
+
+  await runCli([], empty.dependencies);
+  await runCli(["--help"], help.dependencies);
+
+  assert.match(empty.stdout.join("\n"), /usage: kepos/i);
+  assert.equal(help.stdout.join("\n"), empty.stdout.join("\n"));
+});
+
+test("partial commands report valid CLI usage", async () => {
+  const cli = fakeCli();
+
+  await assert.rejects(
+    () => runCli(["publisher"], cli.dependencies),
+    /unknown command: publisher[\s\S]*usage: kepos/i,
+  );
+});
+
 test("signal wait removes handlers after one awaited stop", async () => {
   const beforeInt = process.listenerCount("SIGINT");
   const beforeTerm = process.listenerCount("SIGTERM");

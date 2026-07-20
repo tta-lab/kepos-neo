@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { Duplex } from "node:stream";
+import { Duplex, PassThrough } from "node:stream";
 import { test } from "node:test";
 
 import type { DhtStream } from "../src/mux/hyperdht.js";
@@ -110,6 +110,42 @@ test("reconnect observations report failed attempt delay and total recovery", as
   assert.equal(restoredEvent?.recoveryAttempt, 2);
   assert.equal(restoredEvent?.recoveryElapsedMs, 100);
 
+  await connection.stop();
+});
+
+test("service open yields before retrying a destroyed outer connection", async () => {
+  const delays: number[] = [];
+  const initial = new FakeDhtStream(true);
+  const restored = new FakeDhtStream(true);
+  const candidates = [initial, restored];
+  const connection = createPublisherConnection({
+    connect: () => {
+      const stream = candidates.shift();
+      if (!stream) throw new Error("unexpected connection attempt");
+      return stream;
+    },
+    createMuxSubscriber: (outer) => ({
+      close: () => outer.destroy(),
+      open: async () => {
+        if (outer === initial) throw new Error("outer destroyed");
+        return new PassThrough();
+      },
+    }),
+    now: () => 1_000,
+    route: "auto",
+    sleep: async (delayMs) => {
+      delays.push(delayMs);
+      await new Promise((resolve) => setImmediate(resolve));
+    },
+  });
+
+  await connection.start();
+  initial.destroy();
+  const stream = await connection.open("ssh");
+
+  assert.deepEqual(delays, [10]);
+
+  stream.destroy();
   await connection.stop();
 });
 
