@@ -464,6 +464,6 @@ The migrated route, retry, snapshot, and transfer-observation behavior came
 from Hypertele fork commit
 `cdb851bf750369d5b9eaead3975580e8459fe025`. The raw probe, gzip mode, CLI, and
 one-connection-per-local-TCP architecture were not migrated. The persistent
-Protomux runtime is a Kepos-specific rewrite. `THIRD_PARTY_NOTICES.md` records
-upstream provenance and the source package's declared MIT metadata; the source
-repository had no standalone LICENSE file at the migration commit.
+Protomux runtime is a Kepos-specific rewrite.
+`docs/hypertele-provenance.md` records the migration audit, upstream metadata,
+and the authorship of the fork additions that moved into Kepos.
