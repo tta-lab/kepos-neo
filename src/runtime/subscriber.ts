@@ -5,6 +5,7 @@ import {
 } from "node:net";
 import type { Duplex } from "node:stream";
 
+import { startHttpGateway } from "../home/gateway.js";
 import {
   createDht,
   dhtStreamSnapshot,
@@ -41,6 +42,7 @@ export interface RunningSubscriberService {
 export interface StartSubscriberOptions {
   stateDir: string;
   bootstrap?: DhtAddress[];
+  gatewayPort?: number;
   services: SubscriberService[];
   log?: (line: string) => void;
   now?: () => number;
@@ -105,12 +107,11 @@ export async function startSubscriber(
   try {
     await connection.start();
 
-    const homeServer = await listenService(
-      "home",
-      contact.requestedLocalPort,
-      connection,
-    );
-    servers.push(homeServer.server);
+    const gateway = await startHttpGateway({
+      port: options.gatewayPort ?? (contact.requestedLocalPort || undefined),
+      open: connection.open,
+    });
+    servers.push(gateway.server);
     const services: RunningSubscriberService[] = [];
     for (const service of options.services) {
       const listener = await listenService(
@@ -122,7 +123,7 @@ export async function startSubscriber(
       services.push({ id: service.id, port: listener.port });
     }
 
-    options.log?.(`Local Home ready @http://127.0.0.1:${homeServer.port}`);
+    options.log?.(`Local HTTP gateway ready @${gateway.url}`);
     for (const service of services) {
       options.log?.(`Local ${service.id} ready @127.0.0.1:${service.port}`);
     }
@@ -130,8 +131,8 @@ export async function startSubscriber(
     return {
       publisherKey: contact.publisherKey,
       home: {
-        port: homeServer.port,
-        url: `http://127.0.0.1:${homeServer.port}`,
+        port: gateway.port,
+        url: gateway.url,
       },
       services,
       status: () => ({
@@ -139,7 +140,7 @@ export async function startSubscriber(
         state: stopped ? "stopped" : "running",
         connection: connection.status(),
         publisherKey: contact.publisherKey,
-        homeUrl: `http://127.0.0.1:${homeServer.port}`,
+        homeUrl: gateway.url,
         services: services.map((service) => ({ ...service })),
       }),
       async stop(): Promise<void> {

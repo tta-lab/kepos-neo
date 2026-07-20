@@ -264,6 +264,8 @@ test("subscriber run maps services and writes NDJSON observations", async () => 
       "./subscriber",
       "--service",
       "ssh:2222",
+      "--gateway-port",
+      "18080",
       "--route",
       "public",
       "--bootstrap",
@@ -277,11 +279,13 @@ test("subscriber run maps services and writes NDJSON observations", async () => 
   const [options] = cli.calls.startSubscriber as Array<{
     stateDir: string;
     services: Array<{ id: string; localPort: number }>;
+    gatewayPort: number;
     route: string;
     bootstrap: Array<{ host: string; port: number }>;
   }>;
   assert.equal(options.stateDir, path.resolve("./subscriber"));
   assert.deepEqual(options.services, [{ id: "ssh", localPort: 2222 }]);
+  assert.equal(options.gatewayPort, 18_080);
   assert.equal(options.route, "public");
   assert.deepEqual(options.bootstrap, [
     { host: "34.143.181.65", port: 49738 },

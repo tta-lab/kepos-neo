@@ -66,15 +66,35 @@ npm run kepos -- subscriber run \
 Bootstrap nodes only help the process enter the public DHT. They do not relay
 the established stream, grant access, or change the pinned publisher key.
 
-Open Home and any configured TCP services together:
+Run one local HTTP gateway plus any raw TCP listeners:
 
 ```sh
 npm run kepos -- subscriber run \
   --state ~/.local/state/kepos-neo/subscriber \
-  --service ssh:2222 \
-  --service navidrome:4533
+  --service ssh:2222
 
 ssh -p 2222 <user>@127.0.0.1
+```
+
+The HTTP gateway listens on `127.0.0.1:17480` by default. Every published HTTP
+service is available through the same listener and one persistent publisher
+connection:
+
+```text
+http://home.localhost:17480/
+http://navidrome.localhost:17480/
+```
+
+The gateway maps the request hostname to a Protomux service ID. HTTP services
+do not need a subscriber `--service` option or a separate local process.
+`--service id:local-port` remains for raw TCP services such as SSH. If 17480
+is occupied, select another gateway port:
+
+```sh
+npm run kepos -- subscriber run \
+  --state ~/.local/state/kepos-neo/subscriber \
+  --gateway-port 18080 \
+  --service ssh:2222
 ```
 
 Subscriber route mode defaults to `auto`, which permits HyperDHT's LAN-local
@@ -92,9 +112,9 @@ timeout, retransmit, recovery, and byte/packet counters. These are sanitized
 diagnostics whose shape may change; do not treat them as a stable API or copy
 state files into logs.
 
-The command prints the local Home URL. The local listeners remain stable while
-the subscriber reconnects in the background after a publisher restart. Active
-TCP stream recovery is deferred.
+The command prints the local Home URL. The gateway and raw TCP listeners remain
+stable while the subscriber reconnects in the background after a publisher
+restart. Active TCP stream recovery is deferred.
 
 An empty allowlist revokes every subscriber without rotating the publisher
 key:

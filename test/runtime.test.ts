@@ -105,6 +105,7 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
     subscriber = await startSubscriber({
       stateDir: subscriberState,
       bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
       services: [],
     });
     assert.deepEqual(subscriber.status(), {
@@ -198,6 +199,7 @@ test("subscriber runtime rejects state that the shared state loader rejects", as
       runningSubscriber = await startSubscriber({
         stateDir: subscriberState,
         bootstrap: testnet.bootstrap,
+        gatewayPort: 0,
         services: [],
       });
       await runningSubscriber.stop();

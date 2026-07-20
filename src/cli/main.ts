@@ -34,6 +34,7 @@ import {
 import {
   observationMode,
   parseBootstrapOptions,
+  parseGatewayPortOption,
   parseOptions,
   parsePublisherService,
   parseRouteOption,
@@ -246,6 +247,7 @@ async function runSubscriberCommand(
   const options = parseOptions(arguments_, [
     "--state",
     "--service",
+    "--gateway-port",
     "--route",
     "--observations",
     "--bootstrap",
@@ -260,6 +262,7 @@ async function runSubscriberCommand(
   const running = await dependencies.startSubscriber({
     stateDir: requiredState(options),
     bootstrap: parseBootstrapOptions(options),
+    gatewayPort: parseGatewayPortOption(options),
     services,
     route: parseRouteOption(options),
     observe: observationWriter(mode, dependencies),

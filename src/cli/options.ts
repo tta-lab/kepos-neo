@@ -91,6 +91,15 @@ export function parseRouteOption(options: ParsedOptions): Route {
   return parseRoute(singleOption(options, "--route") ?? "auto");
 }
 
+export function parseGatewayPortOption(
+  options: ParsedOptions,
+): number | undefined {
+  const value = singleOption(options, "--gateway-port");
+  return value === undefined
+    ? undefined
+    : parseTcpPort(value, "--gateway-port");
+}
+
 export function parseBootstrapOptions(
   options: ParsedOptions,
 ): DhtAddress[] | undefined {

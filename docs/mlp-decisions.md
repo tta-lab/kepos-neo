@@ -70,16 +70,18 @@ not install a system DNS resolver or Android `VpnService`.
 Example local URLs:
 
 ```text
-http://alice-a1b2.kepos.localhost:17480/
-http://navidrome.alice-a1b2.kepos.localhost:17480/
+http://home.localhost:17480/
+http://navidrome.localhost:17480/
 ```
 
 - `*.localhost` keeps traffic on loopback without a custom DNS service.
 - The fixed gateway port is configurable if the default port is occupied.
-- The stable suffix contains a short identity-derived value so two people with
-  the same display name do not collide.
-- The gateway maps the request `Host` to a trusted peer and service ID, then
-  forwards the TCP bytes through the P2P tunnel.
+- The current subscriber connects to one pinned publisher, so the hostname
+  only needs to identify the service.
+- The gateway maps the request `Host` to a service ID, then forwards the raw
+  HTTP bytes through a Protomux channel on the persistent P2P connection.
+- Supporting several publishers at once, including an identity-derived
+  hostname suffix, remains deferred.
 - A Blog is an ordinary registered HTTP service. Kepos does not provide a
   Blog engine, CMS, renderer, editor, content store, or content sync.
 - The first smoke uses a tiny static Blog fixture as the default `home`

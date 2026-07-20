@@ -144,22 +144,20 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     subscriber = await startSubscriber({
       stateDir: subscriberState,
       bootstrap: testnet.bootstrap,
-      services: [
-        { id: "navidrome", localPort: 0 },
-        { id: "ssh", localPort: 0 },
-      ],
+      gatewayPort: 0,
+      services: [{ id: "ssh", localPort: 0 }],
       log: noLog,
       observe: (event) => subscriberEvents.push(event),
     });
 
-    const navidrome = subscriber.services.find((service) => service.id === "navidrome");
     const ssh = subscriber.services.find((service) => service.id === "ssh");
-    assert.ok(navidrome);
     assert.ok(ssh);
 
     const [homeResponse, audioResponse, sshResponse] = await Promise.all([
       fetch(subscriber.home.url),
-      fetch(`http://127.0.0.1:${navidrome.port}/rest/stream`),
+      fetch(
+        `http://navidrome.localhost:${subscriber.home.port}/rest/stream`,
+      ),
       exchangeTcp(ssh.port, "hello"),
     ]);
     assert.equal(homeResponse.status, 200);
@@ -273,12 +271,14 @@ test("one publisher accepts multiple subscribers with independent connections", 
     subscriberA = await startSubscriber({
       stateDir: subscriberAState,
       bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
       services: [],
       log: noLog,
     });
     subscriberB = await startSubscriber({
       stateDir: subscriberBState,
       bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
       services: [],
       log: noLog,
     });
@@ -353,6 +353,7 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
         unknown = await startSubscriber({
           stateDir: unknownState,
           bootstrap: testnet?.bootstrap,
+          gatewayPort: 0,
           services: [],
           log: noLog,
         });
@@ -422,6 +423,7 @@ test("subscriber reconnects in the background without changing local ports", asy
     subscriber = await startSubscriber({
       stateDir: subscriberState,
       bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
       services: [],
       log: noLog,
       observe: (event) => subscriberEvents.push(event),

@@ -24,6 +24,41 @@ prove:
 - active TCP stream recovery after a dropped outer connection remains
   deferred.
 
+### Hostname gateway to WSL Navidrome
+
+On 2026-07-20, the current branch was copied to
+`/home/neil/.local/share/kepos-neo-mux` on kosmos-wsl. A new publisher state
+exposed WSL Navidrome at `127.0.0.1:4533`; a new Mac subscriber state used the
+default local gateway port without a raw Navidrome listener.
+
+Two attempts through HyperDHT's built-in bootstrap set ended with
+`HOLEPUNCH_ABORTED` after 7.04 and 14.93 seconds. With the four locally
+validated CN, HK, SG, and US bootstrap endpoints configured on both sides, the
+outer connection completed in 2.48 seconds. The successful transport snapshot
+reported a public IPv4 endpoint and roughly 438–456 ms RTT.
+
+The Mac then used the hostname gateway:
+
+| Request | Result | First byte | Total |
+| --- | --- | ---: | ---: |
+| `http://home.localhost:17480/` | HTTP 200, 2,863 bytes | 1.010 s | 1.012 s |
+| `http://navidrome.localhost:17480/ping` | HTTP 200 | 1.466 s | 1.467 s |
+| `http://navidrome.localhost:17480/` | HTTP 302 | 1.455 s | 1.455 s |
+| Navidrome root with redirect followed | HTTP 200, 2,507 bytes | 1.470 s | 1.472 s |
+| repeated Navidrome `/ping` | HTTP 200 | 1.428 s | 1.428 s |
+
+Concurrent Home and Navidrome requests opened separate `home` and
+`navidrome` channels with the same subscriber `outerId`. The publisher also
+reported one accepted outer connection and the matching service channels.
+This proves hostname routing and service multiplexing without another
+HyperDHT handshake or one subscriber process per HTTP service.
+
+A 16 MiB Home benchmark through the same gateway returned HTTP 200 in 5.91
+seconds. Curl's end-to-end rate was 2.84 MB/s; channel observations measured
+about 4.06 MB/s after first byte. The transient publisher and subscriber were
+stopped after the sample. The existing dogfood systemd publisher remained
+active and unchanged.
+
 ### LAN `auto`
 
 The publisher and subscriber both ran on the Mac with the normal public
