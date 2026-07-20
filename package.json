@@ -2,6 +2,7 @@
   "name": "kepos-neo",
   "version": "0.0.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "packageManager": "npm@10.9.8",
   "engines": {
