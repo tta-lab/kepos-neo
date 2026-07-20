@@ -48,11 +48,14 @@ test("Home Registry rejects a malformed publisher key", () => {
   );
 });
 
-test("Home Registry lists configured TCP services without publisher-local targets", () => {
+test("Home Registry treats only ssh as TCP without exposing publisher-local targets", () => {
   const registry = createHomeRegistry({
     publisherKey,
     displayName: "kosmos",
-    services: [{ id: "ssh", name: "SSH", kind: "tcp" }],
+    services: [
+      { id: "navidrome", name: "Navidrome", kind: "tcp" },
+      { id: "ssh", name: "SSH", kind: "tcp" },
+    ],
   });
 
   assert.deepEqual(registry, {
@@ -61,6 +64,7 @@ test("Home Registry lists configured TCP services without publisher-local target
     publisher: { displayName: "kosmos", publisherKey },
     services: [
       { id: "home", name: "Home", kind: "http" },
+      { id: "navidrome", name: "Navidrome", kind: "http" },
       { id: "ssh", name: "SSH", kind: "tcp" },
     ],
   });
@@ -166,9 +170,25 @@ test("Home server renders every Registry service", async () => {
     assert.match(body, /3 available/);
     assert.match(body, /Navidrome/);
     assert.match(body, /SSH/);
+    assert.match(
+      body,
+      new RegExp(`href="http://navidrome\\.localhost:${home.port}/"`),
+    );
+    assert.match(body, /data-copy-command="ssh -p 2222 127\.0\.0\.1"/);
   } finally {
     await home.close();
   }
+});
+
+test("Home server serves the local copy-button script", async () => {
+  await withHome(async (home) => {
+    const response = await fetch(`${home.url}/app.js`);
+    const body = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "text/javascript; charset=utf-8");
+    assert.match(body, /navigator\.clipboard\.writeText/);
+  });
 });
 
 test("Home server serves the local compiled stylesheet", async () => {
@@ -182,13 +202,13 @@ test("Home server serves the local compiled stylesheet", async () => {
   });
 });
 
-test("Home server serves the Registry with its revision ETag", async () => {
+test("Home server serves the Registry with a content ETag", async () => {
   await withHome(async (home) => {
     const response = await fetch(`${home.url}/.well-known/kepos/services.json`);
 
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
-    assert.equal(response.headers.get("etag"), '"1"');
+    assert.match(response.headers.get("etag") ?? "", /^"[0-9a-f]{64}"$/);
     assert.deepEqual(
       await response.json(),
       createHomeRegistry({
@@ -202,12 +222,16 @@ test("Home server serves the Registry with its revision ETag", async () => {
 
 test("Home server returns an empty 304 for a matching Registry ETag", async () => {
   await withHome(async (home) => {
+    const first = await fetch(`${home.url}/.well-known/kepos/services.json`);
+    const etag = first.headers.get("etag");
+    assert.ok(etag);
+
     const response = await fetch(`${home.url}/.well-known/kepos/services.json`, {
-      headers: { "if-none-match": '"1"' },
+      headers: { "if-none-match": etag },
     });
 
     assert.equal(response.status, 304);
-    assert.equal(response.headers.get("etag"), '"1"');
+    assert.equal(response.headers.get("etag"), etag);
     assert.equal(await response.text(), "");
   });
 });
@@ -268,7 +292,8 @@ test("default Home source stays local, semantic, and responsive", async () => {
   assert.match(html, /max-w-/);
   assert.match(html, /sm:/);
   assert.match(html, /\{\{SERVICE_ROWS\}\}/);
-  assert.doesNotMatch(html, /<script\b|https?:\/\/|data-theme=|gradient|\bcard\b/i);
+  assert.match(html, /<script\s+src=["']\/app\.js["']\s+defer><\/script>/i);
+  assert.doesNotMatch(html, /https?:\/\/|data-theme=|gradient|\bcard\b/i);
 
   assert.match(inputCss, /@import\s+["']tailwindcss["'];/);
   assert.match(inputCss, /@plugin\s+["']daisyui["'];/);

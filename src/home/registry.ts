@@ -58,7 +58,10 @@ export function createHomeRegistry(
       if (service.kind !== "tcp") {
         throw new Error(`service ${index} kind must be tcp`);
       }
-      return { ...service };
+      return {
+        ...service,
+        kind: service.id === "ssh" ? "tcp" : "http",
+      };
     },
   );
 
