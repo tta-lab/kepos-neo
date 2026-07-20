@@ -54,17 +54,39 @@ test("production runtime has no P0, dogfood, or Hypertele path", async () => {
   }
 });
 
-test("dogfood publisher unit starts the canonical publisher CLI", async () => {
+test("dogfood publisher unit requires separately initialized multiplex state", async () => {
   const service = await readFile(
     "deploy/kepos-dogfood-publisher.service",
     "utf8",
   );
+  const evidence = await readFile(
+    "docs/evidence/mac-kosmos-ssh-dogfood.md",
+    "utf8",
+  );
+  const stateDir = "/home/neil/.local/state/kepos-neo/mux-publisher";
 
   assert.match(
     service,
-    /ExecStart=.*npm run kepos -- publisher run --state /,
+    new RegExp(
+      `ConditionPathExists=${stateDir}/publisher\\.manifest\\.json`,
+    ),
+  );
+  assert.match(
+    service,
+    new RegExp(`ConditionPathExists=${stateDir}/publisher\\.json`),
+  );
+  assert.match(
+    service,
+    new RegExp(
+      `ExecStart=.*npm run kepos -- publisher run --state ${stateDir}`,
+    ),
   );
   assert.doesNotMatch(service, /dogfood:publisher/);
+  assert.match(
+    evidence,
+    /setup publisher[\s\S]*--state ~\/\.local\/state\/kepos-neo\/mux-publisher/,
+  );
+  assert.match(evidence, /legacy state.*not compatible/i);
 });
 
 test("network research tools live outside the Kepos product repository", async () => {

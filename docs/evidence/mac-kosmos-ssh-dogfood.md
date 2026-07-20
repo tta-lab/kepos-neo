@@ -202,7 +202,7 @@ proved:
 - publisher state and public keys remain stable across repeated setup;
 - all child processes and listeners close cleanly.
 
-## Real kosmos proof
+## Historical real kosmos proof
 
 The publisher was copied through the existing `ssh nuc` path and started as
 the enabled `kepos-dogfood-publisher.service` user unit. The unit publishes:
@@ -302,11 +302,40 @@ transfer. Once established, this path moved large responses at roughly
 
 ## Deployment status
 
-The live kosmos deployment is deliberately transient:
+The earlier live kosmos deployment was deliberately transient:
 
 - source: `/home/neil/.local/share/kepos-neo-dogfood`
-- publisher state: `/home/neil/.local/state/kepos-neo/publisher`
+- legacy publisher state: `/home/neil/.local/state/kepos-neo/publisher`
 - user unit: `kepos-dogfood-publisher.service`
+
+That legacy state is not compatible with the persistent multiplex runtime. Its
+manifest uses `homeConfig` and per-service config files, while the current
+runtime requires `publisherConfig` and exactly two state files. The checked-in
+unit therefore uses a new state directory:
+
+```text
+~/.local/state/kepos-neo/mux-publisher
+```
+
+Initialize it once before enabling or restarting the updated unit:
+
+```sh
+cd ~/.local/share/kepos-neo-dogfood
+export MAC_SUBSCRIBER_PUBLIC_KEY='<64-character-lowercase-hex-key>'
+npm run kepos -- setup publisher \
+  --state ~/.local/state/kepos-neo/mux-publisher \
+  --display-name kosmos-wsl \
+  --allow "$MAC_SUBSCRIBER_PUBLIC_KEY" \
+  --service ssh:SSH:22 \
+  --service navidrome:Navidrome:4533
+systemctl --user daemon-reload
+systemctl --user restart kepos-dogfood-publisher.service
+```
+
+The unit has `ConditionPathExists` checks for both canonical state files, so it
+does not enter a restart loop before this setup is complete. This document
+does not claim that the updated unit and new state directory have been
+redeployed yet.
 
 FlickNote orientation note `1342` records the exact NixOS and agenix follow-up.
 The permanent change needs the authoritative kosmos repo, which is not present

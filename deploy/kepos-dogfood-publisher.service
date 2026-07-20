@@ -1,12 +1,14 @@
 [Unit]
 Description=Kepos Neo dogfood publisher
 After=network-online.target
+ConditionPathExists=/home/neil/.local/state/kepos-neo/mux-publisher/publisher.manifest.json
+ConditionPathExists=/home/neil/.local/state/kepos-neo/mux-publisher/publisher.json
 
 [Service]
 Type=simple
 WorkingDirectory=/home/neil/.local/share/kepos-neo-dogfood
 Environment=PATH=/run/current-system/sw/bin:/usr/bin:/bin
-ExecStart=/run/current-system/sw/bin/npm run kepos -- publisher run --state /home/neil/.local/state/kepos-neo/publisher
+ExecStart=/run/current-system/sw/bin/npm run kepos -- publisher run --state /home/neil/.local/state/kepos-neo/mux-publisher
 Restart=on-failure
 RestartSec=5
 KillMode=mixed
