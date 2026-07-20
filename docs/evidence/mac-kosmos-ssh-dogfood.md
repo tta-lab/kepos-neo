@@ -161,9 +161,8 @@ specific service. A stronger application-health protocol is deferred until
 field evidence shows that those states are insufficient.
 
 The persistent outer connection, Protomux service protocol, publisher
-allowlist, shared runtime, and state model are Kepos-specific. Full attribution
-and the source package's declared MIT metadata are in
-`THIRD_PARTY_NOTICES.md`.
+allowlist, shared runtime, and state model are Kepos-specific. The migration
+audit and upstream provenance are in `docs/hypertele-provenance.md`.
 
 ## Earlier public-path proof
 
