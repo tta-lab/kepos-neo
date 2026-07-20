@@ -11,9 +11,10 @@ documents are:
 - [Game multiplayer scenarios](./game-multiplayer-scenarios.md)
 - [Network transport and compatibility](./network-transport-and-compatibility.md)
 
-`P0` names the first single-desktop technical slice inside MLP V0. It verifies
-the Hypertele baseline and Home integration, but does not by itself pass the
-full MLP V0 product-value gate or enter MLP V1.
+`P0` names the completed, historical single-desktop technical slice inside MLP
+V0. It verified the Hypertele baseline and Home integration. Its executable
+runtime has since been replaced by the persistent Kepos mux runtime; only its
+evidence remains.
 
 ## Product boundary
 
@@ -69,16 +70,18 @@ not install a system DNS resolver or Android `VpnService`.
 Example local URLs:
 
 ```text
-http://alice-a1b2.kepos.localhost:17480/
-http://navidrome.alice-a1b2.kepos.localhost:17480/
+http://home.localhost:17480/
+http://navidrome.localhost:17480/
 ```
 
 - `*.localhost` keeps traffic on loopback without a custom DNS service.
 - The fixed gateway port is configurable if the default port is occupied.
-- The stable suffix contains a short identity-derived value so two people with
-  the same display name do not collide.
-- The gateway maps the request `Host` to a trusted peer and service ID, then
-  forwards the TCP bytes through the P2P tunnel.
+- The current subscriber connects to one pinned publisher, so the hostname
+  only needs to identify the service.
+- The gateway maps the request `Host` to a service ID, then forwards the raw
+  HTTP bytes through a Protomux channel on the persistent P2P connection.
+- Supporting several publishers at once, including an identity-derived
+  hostname suffix, remains deferred.
 - A Blog is an ordinary registered HTTP service. Kepos does not provide a
   Blog engine, CMS, renderer, editor, content store, or content sync.
 - The first smoke uses a tiny static Blog fixture as the default `home`
@@ -104,28 +107,84 @@ cross-origin JavaScript still follows CORS, CSP, cookie, and Origin rules.
 Each publisher owns one allowlist. Every service explicitly published by that
 publisher uses the same trusted peer-key set.
 
-MLP does not require multiplex before evidence:
+P0 allowed one Hypertele process and one service key per published service.
+Later public-path tests measured multi-second cold connection setup and showed
+that a route is reusable for only a short window after each connection closes.
+The canonical transport shape is therefore:
 
-- P0 may run one pinned Hypertele server process per published service.
-- A small local supervisor may generate each process configuration from the
-  same publisher allowlist.
-- Service registry and local gateway are higher priority than combining
-  processes.
-- A single daemon and Protomux multiplex remain the preferred later shape, but
-  are implemented only if process count, connection setup, or resource usage
-  becomes a measured problem.
-- Regardless of process shape, remote peers cannot select an arbitrary target
-  host or port. Targets come only from publisher-local service configuration.
+- one publisher daemon instead of one Hypertele child per service;
+- one subscriber daemon instead of one Hypertele child per local endpoint;
+- one persistent authenticated connection between a subscriber and publisher;
+- one Protomux instance on that connection;
+- one logical channel per proxied TCP connection, with `serviceId` selecting
+  Home, Navidrome, SSH, or another configured service;
+- background keepalive and reconnect owned by the daemon, independent of
+  browser, player, or SSH socket lifetimes.
+
+A subscriber defaults to one configured publisher in the first version. A
+publisher may accept multiple subscribers concurrently, with one independent
+persistent connection per subscriber. The protocol may support multiple
+publishers later, but the first client does not manage them.
+
+Remote peers cannot select an arbitrary target host or port. A `serviceId`
+resolves only through publisher-local configuration.
 
 ### Runtime and package management
 
 - Node.js is the runtime.
 - New source is TypeScript.
 - npm manages dependencies and scripts.
-- P0 invokes the pinned Hypertele CLI from Node rather than requiring a global
-  user installation.
-- Desktop framework and Android packaging are deferred until the network and
-  service model pass P0.
+- Kepos imports HyperDHT and Protomux directly; it does not spawn or depend on
+  Hypertele.
+- The canonical CLI runs the shared publisher/subscriber runtime in the
+  foreground. launchd,
+  Windows Service integration, scheduled tasks, login startup, and desktop
+  packaging are deployment work, not transport requirements.
+- Desktop framework selection and Android packaging are deferred until the
+  shared transport and service model are stable.
+
+### Desktop application shape
+
+The desktop product follows the familiar remote-desktop application shape:
+one visible control window backed by a resident tray or menu-bar process. The
+desktop application process owns the publisher and subscriber runtimes
+directly; the first version does not split the UI from a separately supervised
+child daemon.
+
+Lifecycle semantics are explicit:
+
+- opening Kepos starts its configured network roles;
+- closing the main window hides it while the tray process and publisher remain
+  online;
+- choosing **Quit Kepos** stops the publisher, subscriber connections, and
+  local listeners;
+- locking the desktop does not intentionally stop Kepos, but logout, reboot,
+  sleep, process failure, or explicit quit may make it unavailable;
+- the first version does not promise pre-login or reboot-persistent unattended
+  access.
+
+This avoids launchd, Windows Service, scheduled-task, privilege, child-process
+versioning, and orphan-process work during the desktop-first product spike.
+The same TypeScript network core may later run as a headless daemon on NAS,
+WSL, and Linux servers. A system service remains an optional deployment mode
+for measured unattended-access demand, not the default desktop architecture.
+
+The desktop navigation borrows the device-detail shell of remote-desktop
+applications without treating the whole machine as the shared resource:
+
+- the sidebar lists local devices and publishers shared with the user;
+- the application opens the last-used remote publisher by default;
+- the selected publisher page leads with online state, path quality, and an
+  **Open Home** action;
+- Navidrome, SSH, and other published services appear as quick-launch actions;
+- **Add service** appears only on a local publisher page, while **Add
+  publisher** starts pairing from a remote-device context;
+- the list may reserve space for several publishers, but the first subscriber
+  runtime still connects to only one configured publisher.
+
+The tray surface stays small: current online state, number of shared services
+and connected subscribers, open Kepos, pause sharing, and quit. It is a
+lifecycle and status surface, not a second configuration UI.
 
 ### MLP identity boundary
 
@@ -150,29 +209,51 @@ checks the corresponding public key against the allowlist.
 
 ### MLP key model
 
-MLP has three key roles and no separate `publisherKey` or `personKey`:
+The persistent multiplex model has two key roles and no separate key per
+service:
 
 | Key | Held or learned by | Purpose |
 | --- | --- | --- |
-| `clientKey` | Generated and held by the connecting client | Proves the client identity checked by a publisher allowlist |
-| `homeKey` | Held by the publisher; pinned by each client | Stable publisher entry point, Home service address, and live Registry trust anchor |
-| `serviceKey` | Held by each separately exposed Hypertele service; learned by clients from Registry | Connects to one published service while MLP uses one process per service |
+| `subscriberKey` | Generated and held by the connecting subscriber | Proves the subscriber identity checked by a publisher allowlist |
+| `publisherKey` | Held by the publisher and pinned by each subscriber | Stable publisher identity, DHT entry point, and Registry trust anchor |
 
 Out-of-band pairing exchanges only two public values:
 
 ```text
-client -> publisher: clientPublicKey
-publisher -> client: homePublicKey
+subscriber -> publisher: subscriberPublicKey
+publisher -> subscriber: publisherPublicKey
 ```
 
-The client stores its own `clientSecretKey` locally and binds a local Person
-label such as Alice to `homePublicKey`. It does not manually learn individual
-service keys. After connecting to `homeKey`, it fetches Registry and caches the
-declared `serviceKey` values under that pinned Home.
+The subscriber stores its own secret key locally and binds a local Person label
+such as Alice to `publisherKey`. After authentication, Registry entries name
+services by `serviceId`; they do not contain service keys. Opening a service is
+an authenticated multiplex operation on the existing publisher connection.
 
-`homeKey` is the publisher identity for MLP. Rotating it requires re-pairing.
-A later Person root could sign a replacement Home key, but that recovery layer
-is explicitly deferred.
+The canonical runtime uses `publisherKey` and one persistent multiplex
+connection. The older P0 `homeKey`, per-service keys, and Hypertele child
+processes remain only in historical evidence; they are not executable paths or
+part of this protocol.
+
+Rotating `publisherKey` requires re-pairing. A later Person root could sign a
+replacement publisher key, but that recovery layer is explicitly deferred.
+
+### Deferred from the first multiplex version
+
+- one subscriber maintaining connections to multiple publishers;
+- per-service allowlists, roles, or grants;
+- one key or DHT announcement per service;
+- launchd, Windows Service, scheduled-task, login-startup, desktop packaging,
+  or unattended access before login;
+- mobile background lifecycle and battery policy;
+- relay operation or TCP/WSS fallback;
+- multiple outer connections per subscriber for traffic classes;
+- transparent recovery of an active TCP stream after the outer connection
+  drops;
+- arbitrary remote target hosts or ports.
+
+The first version must still support multiple subscribers per publisher,
+multiple published services, and multiple concurrent logical TCP channels on
+each subscriber connection.
 
 ## Network stages
 
@@ -215,7 +296,7 @@ V1 validates:
 - at least two member people concurrently using one named TCP service;
 - local authorization without an online controller decision;
 - one publisher allowlist shared by every published service;
-- multiple services, with separate Hypertele processes accepted initially;
+- multiple services sharing one persistent Protomux connection;
 - one local HTTP gateway routing the default Blog and later HTTP services by
   `*.kepos.localhost`;
 - compatibility fallback to `127.0.0.1:<port>`;
@@ -363,30 +444,26 @@ signal nor require users to configure it.
 
 ## Current implementation order
 
-1. Run MLP V0 Hello World on the available single desktop: one publisher
-   process, one trusted client identity, and a tiny local static Blog.
-2. Add a second local client identity/process and verify both can open the same
-   Blog. This proves configuration and one-to-many semantics, not independent
-   devices or NAT traversal.
-3. Add a publisher service registry and the local HTTP gateway, initially
-   allowing one Hypertele process per service.
-4. Build the separate Android client-only spike after the desktop path works.
-5. Run the first real cross-device/cross-network smoke with the desktop on
-   broadband and Android on cellular data, first against Blog and then Navic +
-   Navidrome.
-6. Measure locked-screen streaming, network switching, repeated connection
-   setup, memory, and backpressure.
-7. Decide whether measured process or connection cost justifies multiplex.
-8. Run the broader mainland and overseas direct-path matrix when more devices
-   or testers are available.
-9. Build MLP V2 blind UDX relay with limits and diagnostics.
-10. Run hard-NAT, sustained-throughput, and relay-failure tests.
-11. Use measured results to decide whether a TCP/443 relay is needed.
+1. Merge the canonical transport migration after its shared runtime, route,
+   observation, reconnect, and P0-removal checks pass.
+2. Keep the foreground CLI as the headless host and build the desktop host over
+   the same lifecycle APIs and state.
+3. Use field evidence to decide whether application health, diagnostics
+   storage, native packaging hardening, or multi-publisher support is needed.
+4. Run a broader direct-path matrix when stable hosts and testers are
+   available.
+5. Build an MLP V2 blind UDX relay only after measured direct-path failures
+   justify it.
+6. Use measured relay results to decide whether a TCP/443 relay is needed.
 
-The single-desktop smoke must not claim evidence for public-DHT reachability,
-NAT punching, CGNAT, cross-carrier quality, mobile lifecycle, or relay need.
+Historical P0 evidence must not claim public-DHT reachability, NAT punching,
+CGNAT, cross-carrier quality, mobile lifecycle, or relay need beyond what was
+actually tested.
 
-MLP V0 uses the npm package under its declared MIT metadata and does not wait
-for an upstream LICENSE-file change. If source is later copied or forked, the
-fork must retain upstream provenance and record that the source package
-declared MIT while omitting the full LICENSE text.
+The migrated route, retry, snapshot, and transfer-observation behavior came
+from Hypertele fork commit
+`cdb851bf750369d5b9eaead3975580e8459fe025`. The raw probe, gzip mode, CLI, and
+one-connection-per-local-TCP architecture were not migrated. The persistent
+Protomux runtime is a Kepos-specific rewrite. `THIRD_PARTY_NOTICES.md` records
+upstream provenance and the source package's declared MIT metadata; the source
+repository had no standalone LICENSE file at the migration commit.

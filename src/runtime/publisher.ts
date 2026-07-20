@@ -1,0 +1,211 @@
+import { createConnection, type Socket } from "node:net";
+
+import { startHomeServer, type RunningHomeServer } from "../home/server.js";
+import {
+  createDht,
+  dhtStreamSnapshot,
+  keyPairFromSeed,
+  type DhtAddress,
+  type DhtStream,
+} from "../mux/hyperdht.js";
+import {
+  createObservationEmitter,
+  createObservationId,
+  type Observe,
+} from "../mux/observability.js";
+import {
+  createMuxPublisher,
+  type RunningMuxPublisher,
+} from "../mux/transport.js";
+import { loadPublisherState } from "../state/publisher.js";
+
+export interface StartPublisherOptions {
+  stateDir: string;
+  bootstrap?: DhtAddress[];
+  log?: (line: string) => void;
+  now?: () => number;
+  observe?: Observe;
+}
+
+export interface PublisherRuntimeStatus {
+  role: "publisher";
+  state: "running" | "stopped";
+  publisherKey: string;
+  homeUrl: string;
+  acceptedConnections: number;
+  activeSubscribers: number;
+}
+
+export interface RunningPublisher {
+  publisherKey: string;
+  home: RunningHomeServer;
+  acceptedConnections: () => number;
+  activeSubscribers: () => number;
+  status: () => PublisherRuntimeStatus;
+  stop: () => Promise<void>;
+}
+
+export async function startPublisher(
+  options: StartPublisherOptions,
+): Promise<RunningPublisher> {
+  const { config, manifest } = await loadPublisherState(options.stateDir);
+  const keyPair = keyPairFromSeed(config.seed);
+  const publisherKey = keyPair.publicKey.toString("hex");
+  const home = await startHomeServer({
+    publisherKey,
+    displayName: manifest.displayName,
+    services: manifest.services.map(({ id, name, kind }) => ({
+      id,
+      name,
+      kind,
+    })),
+  });
+  const targets = new Map<string, number>([
+    ["home", home.port],
+    ...manifest.services.map(
+      (service): [string, number] => [service.id, service.targetPort],
+    ),
+  ]);
+  const allow = new Set(config.allow);
+  const dht = createDht({ bootstrap: options.bootstrap, keyPair });
+  const now = options.now ?? Date.now;
+  const streams = new Set<DhtStream>();
+  const muxes = new Map<DhtStream, RunningMuxPublisher>();
+  let accepted = 0;
+  let stopped = false;
+
+  const server = dht.createServer(
+    {
+      firewall: (remotePublicKey) => {
+        const rejected = !allow.has(remotePublicKey.toString("hex"));
+        if (rejected) {
+          const observe = createObservationEmitter({
+            observe: options.observe,
+            role: "publisher",
+            outerId: createObservationId("outer"),
+            now,
+          });
+          observe("outer.rejected", { remotePublicKey });
+        }
+        return rejected;
+      },
+      reusableSocket: true,
+    },
+    (stream) => {
+      const outerId = createObservationId("outer");
+      const observe = createObservationEmitter({
+        observe: options.observe,
+        role: "publisher",
+        outerId,
+        now,
+      });
+      accepted++;
+      streams.add(stream);
+      stream.setKeepAlive?.(10_000);
+      observe("outer.accepted", {
+        remotePublicKey: stream.remotePublicKey,
+      });
+      const reportHandshake = observeHandshake(stream, observe);
+      reportHandshake();
+      observe("outer.connected", {
+        transport: dhtStreamSnapshot(stream),
+      });
+      const mux = createMuxPublisher(stream, {
+        outerId,
+        now,
+        observe: options.observe,
+        transportSnapshot: () => dhtStreamSnapshot(stream),
+        connect: async (serviceId) => {
+          const targetPort = targets.get(serviceId);
+          if (targetPort === undefined) {
+            throw new Error(`Service is not published: ${serviceId}`);
+          }
+          return connectLoopback(targetPort);
+        },
+      });
+      muxes.set(stream, mux);
+      stream.once("close", () => {
+        streams.delete(stream);
+        muxes.delete(stream);
+        observe("outer.closed", {
+          trigger: stopped ? "local.stop" : "stream.close",
+        });
+      });
+    },
+  );
+
+  try {
+    await server.listen(keyPair);
+  } catch (error) {
+    await Promise.allSettled([home.close(), dht.destroy({ force: true })]);
+    throw error;
+  }
+
+  options.log?.(`Publisher ready: ${publisherKey}`);
+
+  return {
+    publisherKey,
+    home,
+    acceptedConnections: () => accepted,
+    activeSubscribers: () => streams.size,
+    status: () => ({
+      role: "publisher",
+      state: stopped ? "stopped" : "running",
+      publisherKey,
+      homeUrl: home.url,
+      acceptedConnections: accepted,
+      activeSubscribers: streams.size,
+    }),
+    async stop(): Promise<void> {
+      if (stopped) return;
+      stopped = true;
+      for (const mux of muxes.values()) mux.close();
+      await Promise.allSettled([
+        server.close(),
+        home.close(),
+        dht.destroy({ force: true }),
+      ]);
+    },
+  };
+}
+
+async function connectLoopback(port: number): Promise<Socket> {
+  const socket = createConnection({
+    host: "127.0.0.1",
+    port,
+    allowHalfOpen: true,
+  });
+  await new Promise<void>((resolve, reject) => {
+    const onConnect = (): void => {
+      socket.off("error", onError);
+      resolve();
+    };
+    const onError = (error: Error): void => {
+      socket.off("connect", onConnect);
+      reject(error);
+    };
+    socket.once("connect", onConnect);
+    socket.once("error", onError);
+  });
+  return socket;
+}
+
+function observeHandshake(
+  stream: DhtStream,
+  observe: ReturnType<typeof createObservationEmitter>,
+): () => void {
+  let reported = false;
+  const report = (): void => {
+    if (reported) return;
+    reported = true;
+    observe("outer.handshake", {
+      transport: dhtStreamSnapshot(stream),
+    });
+  };
+  if (stream.connected) {
+    report();
+    return report;
+  }
+  stream.once("handshake", report);
+  return report;
+}

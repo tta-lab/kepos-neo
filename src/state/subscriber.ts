@@ -1,0 +1,110 @@
+import path from "node:path";
+
+import {
+  parseSubscriberContact,
+  serializeSubscriberContact,
+  type SubscriberContact,
+} from "../config.js";
+import {
+  generateClientIdentity,
+  parseClientIdentity,
+  serializeClientIdentity,
+  type ClientIdentity,
+} from "../keys.js";
+import {
+  pathExists,
+  readStateJson,
+  validateStateDirectory,
+  writeStateDirectoryAtomically,
+  writeStateFileAtomically,
+} from "./files.js";
+
+const identityFileName = "client.identity.json";
+const contactFileName = "publisher.contact.json";
+
+export interface SetupSubscriberOptions {
+  stateDir: string;
+}
+
+export interface SetupSubscriberResult {
+  created: boolean;
+  publicKey: string;
+}
+
+export interface SetSubscriberPublisherOptions {
+  stateDir: string;
+  label: string;
+  publisherKey: string;
+}
+
+export interface SubscriberState {
+  identity: ClientIdentity;
+  contact: SubscriberContact;
+}
+
+export async function setupSubscriber(
+  options: SetupSubscriberOptions,
+): Promise<SetupSubscriberResult> {
+  const stateDir = path.resolve(options.stateDir);
+  if (await pathExists(stateDir)) {
+    const identity = await readSubscriberIdentity(stateDir);
+    return { created: false, publicKey: identity.publicKey };
+  }
+
+  const identity = generateClientIdentity();
+  await writeStateDirectoryAtomically(
+    stateDir,
+    new Map([[identityFileName, serializeClientIdentity(identity)]]),
+  );
+  return { created: true, publicKey: identity.publicKey };
+}
+
+export async function setSubscriberPublisher(
+  options: SetSubscriberPublisherOptions,
+): Promise<string> {
+  const stateDir = path.resolve(options.stateDir);
+  await readSubscriberIdentity(stateDir);
+  const contact = parseSubscriberContact({
+    publisherKey: options.publisherKey,
+    label: options.label,
+    requestedLocalPort: 0,
+  });
+  const contactPath = await writeStateFileAtomically(
+    stateDir,
+    contactFileName,
+    serializeSubscriberContact(contact),
+  );
+  await validateStateDirectory(stateDir, [
+    identityFileName,
+    contactFileName,
+  ]);
+  return contactPath;
+}
+
+export async function loadSubscriberState(
+  stateDir: string,
+): Promise<SubscriberState> {
+  stateDir = path.resolve(stateDir);
+  await validateStateDirectory(stateDir, [
+    identityFileName,
+    contactFileName,
+  ]);
+  return {
+    identity: parseClientIdentity(
+      await readStateJson(path.join(stateDir, identityFileName)),
+    ),
+    contact: parseSubscriberContact(
+      await readStateJson(path.join(stateDir, contactFileName)),
+    ),
+  };
+}
+
+async function readSubscriberIdentity(stateDir: string) {
+  const names = (await pathExists(path.join(stateDir, contactFileName)))
+    ? [identityFileName, contactFileName]
+    : [identityFileName];
+  await validateStateDirectory(stateDir, names);
+  return parseClientIdentity(
+    await readStateJson(path.join(stateDir, identityFileName)),
+  );
+}

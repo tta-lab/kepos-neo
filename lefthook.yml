@@ -1,0 +1,6 @@
+lefthook: npm exec --offline -- lefthook
+
+pre-commit:
+  commands:
+    check:
+      run: npm run check

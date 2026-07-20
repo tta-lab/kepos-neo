@@ -1,0 +1,471 @@
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
+import { createConnection, createServer, type Server } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+
+import {
+  startPublisher,
+  type RunningPublisher,
+} from "../src/runtime/publisher.js";
+import {
+  startSubscriber,
+  type RunningSubscriber,
+} from "../src/runtime/subscriber.js";
+import { setupPublisher } from "../src/state/publisher.js";
+import {
+  setSubscriberPublisher,
+  setupSubscriber,
+} from "../src/state/subscriber.js";
+import type { Observation } from "../src/mux/observability.js";
+
+interface HyperDhtTestnet {
+  bootstrap: Array<{ host: string; port: number }>;
+  destroy: () => Promise<void>;
+}
+
+type CreateHyperDhtTestnet = (size: number) => Promise<HyperDhtTestnet>;
+
+const require = createRequire(import.meta.url);
+const createHyperDhtTestnet = require("hyperdht/testnet") as CreateHyperDhtTestnet;
+const noLog = (): void => undefined;
+
+async function listen(server: Server | HttpServer): Promise<number> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("fixture address is unavailable");
+  }
+  return address.port;
+}
+
+async function closeServer(server: Server | HttpServer): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
+async function exchangeTcp(port: number, payload: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let response = "";
+    socket.setEncoding("utf8");
+    socket.setTimeout(5_000, () => socket.destroy(new Error("TCP exchange timed out")));
+    socket.once("connect", () => socket.end(payload));
+    socket.on("data", (chunk) => {
+      response += chunk;
+    });
+    socket.once("error", reject);
+    socket.once("close", () => resolve(response));
+  });
+}
+
+async function waitForHttpOk(url: string, timeoutMs = 8_000): Promise<Response> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return response;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`HTTP endpoint did not recover: ${String(lastError)}`);
+}
+
+test("one persistent subscriber connection carries Home, Navidrome, and SSH", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-daemon-"));
+  const subscriberState = path.join(root, "subscriber");
+  const publisherState = path.join(root, "publisher");
+  const sshServer = createServer({ allowHalfOpen: true }, (socket) => {
+    let request = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      request += chunk;
+    });
+    socket.on("end", () => socket.end(`ssh:${request}`));
+  });
+  const navidromeServer = createHttpServer((request, response) => {
+    response.writeHead(200, {
+      "content-type": "audio/flac",
+      "x-request-path": request.url ?? "/",
+    });
+    response.end(Buffer.alloc(64 * 1024, 7));
+  });
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let testError: unknown;
+  const publisherEvents: Observation[] = [];
+  const subscriberEvents: Observation[] = [];
+
+  try {
+    const [sshPort, navidromePort] = await Promise.all([
+      listen(sshServer),
+      listen(navidromeServer),
+    ]);
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [
+        { id: "navidrome", name: "Navidrome", targetPort: navidromePort },
+        { id: "ssh", name: "SSH", targetPort: sshPort },
+      ],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+      observe: (event) => publisherEvents.push(event),
+    });
+    subscriber = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [{ id: "ssh", localPort: 0 }],
+      log: noLog,
+      observe: (event) => subscriberEvents.push(event),
+    });
+
+    const ssh = subscriber.services.find((service) => service.id === "ssh");
+    assert.ok(ssh);
+
+    const [homeResponse, audioResponse, sshResponse] = await Promise.all([
+      fetch(subscriber.home.url),
+      fetch(
+        `http://navidrome.localhost:${subscriber.home.port}/rest/stream`,
+      ),
+      exchangeTcp(ssh.port, "hello"),
+    ]);
+    assert.equal(homeResponse.status, 200);
+    assert.equal(audioResponse.status, 200);
+    assert.equal((await audioResponse.arrayBuffer()).byteLength, 64 * 1024);
+    assert.equal(sshResponse, "ssh:hello");
+    assert.equal(publisher.acceptedConnections(), 1);
+
+    const repeated = await fetch(`${subscriber.home.url}/healthz`);
+    assert.equal(repeated.status, 200);
+    assert.equal(publisher.acceptedConnections(), 1);
+    assert.equal(
+      subscriberEvents.filter(({ event }) => event === "outer.connected")
+        .length,
+      1,
+    );
+    assert.ok(
+      subscriberEvents.filter(({ event }) => event === "channel.open-ok")
+        .length >= 3,
+    );
+
+    const subscriberConnected = subscriberEvents.find(
+      ({ event }) => event === "outer.connected",
+    );
+    const subscriberChannel = subscriberEvents.find(
+      ({ event }) => event === "channel.open-ok",
+    );
+    assert.ok(subscriberEvents.some(({ event }) => event === "outer.attempt"));
+    assert.ok(subscriberEvents.some(({ event }) => event === "outer.handshake"));
+    assert.ok(subscriberConnected?.outerId);
+    assert.equal(subscriberConnected.route, "auto");
+    assert.equal(subscriberChannel?.outerId, subscriberConnected.outerId);
+    assert.equal(
+      typeof (subscriberChannel?.transport as { udx?: { rtt?: unknown } })
+        ?.udx?.rtt,
+      "number",
+    );
+    assert.ok(
+      publisherEvents.some(({ event }) => event === "outer.accepted"),
+    );
+    assert.ok(
+      publisherEvents.some(({ event }) => event === "outer.connected"),
+    );
+  } catch (error) {
+    testError = error;
+  }
+
+  const cleanup = await Promise.allSettled([
+    subscriber?.stop(),
+    publisher?.stop(),
+    closeServer(sshServer),
+    closeServer(navidromeServer),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "mux daemon test or cleanup failed",
+    );
+  }
+});
+
+test("one publisher accepts multiple subscribers with independent connections", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-subscribers-"));
+  const publisherState = path.join(root, "publisher");
+  const subscriberAState = path.join(root, "subscriber-a");
+  const subscriberBState = path.join(root, "subscriber-b");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriberA: RunningSubscriber | undefined;
+  let subscriberB: RunningSubscriber | undefined;
+  let testError: unknown;
+
+  try {
+    const [subscriberASetup, subscriberBSetup] = await Promise.all([
+      setupSubscriber({ stateDir: subscriberAState }),
+      setupSubscriber({ stateDir: subscriberBState }),
+    ]);
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [
+        subscriberASetup.publicKey,
+        subscriberBSetup.publicKey,
+      ],
+      services: [],
+    });
+    await Promise.all([
+      setSubscriberPublisher({
+        stateDir: subscriberAState,
+        label: "kosmos",
+        publisherKey: publisherSetup.publisherKey,
+      }),
+      setSubscriberPublisher({
+        stateDir: subscriberBState,
+        label: "kosmos",
+        publisherKey: publisherSetup.publisherKey,
+      }),
+    ]);
+
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    subscriberA = await startSubscriber({
+      stateDir: subscriberAState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [],
+      log: noLog,
+    });
+    subscriberB = await startSubscriber({
+      stateDir: subscriberBState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [],
+      log: noLog,
+    });
+
+    const [homeA, homeB] = await Promise.all([
+      fetch(subscriberA.home.url),
+      fetch(subscriberB.home.url),
+    ]);
+    assert.equal(homeA.status, 200);
+    assert.equal(homeB.status, 200);
+    assert.equal(publisher.acceptedConnections(), 2);
+    assert.equal(publisher.activeSubscribers(), 2);
+  } catch (error) {
+    testError = error;
+  }
+
+  const cleanup = await Promise.allSettled([
+    subscriberA?.stop(),
+    subscriberB?.stop(),
+    publisher?.stop(),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "multi-subscriber test or cleanup failed",
+    );
+  }
+});
+
+test("publisher allowlist rejects an unknown subscriber", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-denied-"));
+  const allowedState = path.join(root, "allowed");
+  const unknownState = path.join(root, "unknown");
+  const publisherState = path.join(root, "publisher");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let unknown: RunningSubscriber | undefined;
+  let testError: unknown;
+  const publisherEvents: Observation[] = [];
+
+  try {
+    const [allowedSetup] = await Promise.all([
+      setupSubscriber({ stateDir: allowedState }),
+      setupSubscriber({ stateDir: unknownState }),
+    ]);
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [allowedSetup.publicKey],
+      services: [],
+    });
+    await setSubscriberPublisher({
+      stateDir: unknownState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+      observe: (event) => publisherEvents.push(event),
+    });
+    await assert.rejects(
+      async () => {
+        unknown = await startSubscriber({
+          stateDir: unknownState,
+          bootstrap: testnet?.bootstrap,
+          gatewayPort: 0,
+          services: [],
+          log: noLog,
+        });
+      },
+      /firewall|denied|connection|handshake|closed/i,
+    );
+    assert.equal(publisher.acceptedConnections(), 0);
+    assert.equal(publisher.activeSubscribers(), 0);
+    const rejected = publisherEvents.find(
+      ({ event }) => event === "outer.rejected",
+    );
+    assert.ok(rejected?.outerId);
+    assert.equal(typeof rejected.remotePublicKey, "string");
+    assert.equal((rejected.remotePublicKey as string).length, 16);
+  } catch (error) {
+    testError = error;
+  }
+
+  const cleanup = await Promise.allSettled([
+    unknown?.stop(),
+    publisher?.stop(),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "allowlist test or cleanup failed",
+    );
+  }
+});
+
+test("subscriber reconnects in the background without changing local ports", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-reconnect-"));
+  const subscriberState = path.join(root, "subscriber");
+  const publisherState = path.join(root, "publisher");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let testError: unknown;
+  const subscriberEvents: Observation[] = [];
+
+  try {
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    subscriber = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [],
+      log: noLog,
+      observe: (event) => subscriberEvents.push(event),
+    });
+    const homeUrl = subscriber.home.url;
+    assert.equal((await fetch(`${homeUrl}/healthz`)).status, 200);
+
+    await publisher.stop();
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+
+    const recovered = await waitForHttpOk(`${homeUrl}/healthz`);
+    assert.equal(recovered.status, 200);
+    assert.equal(subscriber.home.url, homeUrl);
+    assert.equal(publisher.acceptedConnections(), 1);
+    assert.ok(subscriberEvents.some(({ event }) => event === "outer.closed"));
+    assert.ok(subscriberEvents.some(({ event }) => event === "outer.restored"));
+    const connectedOuterIds = subscriberEvents
+      .filter(({ event }) => event === "outer.connected")
+      .map(({ outerId }) => outerId);
+    assert.equal(connectedOuterIds.length, 2);
+    assert.notEqual(connectedOuterIds[0], connectedOuterIds[1]);
+  } catch (error) {
+    testError = error;
+  }
+
+  const cleanup = await Promise.allSettled([
+    subscriber?.stop(),
+    publisher?.stop(),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "reconnect test or cleanup failed",
+    );
+  }
+});

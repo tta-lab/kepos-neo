@@ -1,0 +1,169 @@
+import assert from "node:assert/strict";
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+
+import {
+  parsePublisherConfig,
+  parsePublisherManifest,
+  parseSubscriberContact,
+} from "../src/config.js";
+import { parseClientIdentity } from "../src/keys.js";
+import {
+  setPublisherAllowlist,
+  setPublisherServices,
+  setupPublisher,
+} from "../src/state/publisher.js";
+import {
+  setSubscriberPublisher,
+  setupSubscriber,
+} from "../src/state/subscriber.js";
+
+async function stateDirectory(name: string): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), `kepos-state-${name}-`));
+  return path.join(root, "state");
+}
+
+async function readJson(filePath: string): Promise<unknown> {
+  return JSON.parse(await readFile(filePath, "utf8")) as unknown;
+}
+
+test("subscriber state keeps the current identity file and replaces only its publisher contact", async () => {
+  const stateDir = await stateDirectory("subscriber");
+  const first = await setupSubscriber({ stateDir });
+  const identityPath = path.join(stateDir, "client.identity.json");
+  const identityBytes = await readFile(identityPath);
+
+  assert.equal(first.created, true);
+  assert.equal(
+    parseClientIdentity(await readJson(identityPath)).publicKey,
+    first.publicKey,
+  );
+  assert.deepEqual(await readdir(stateDir), ["client.identity.json"]);
+
+  await setSubscriberPublisher({
+    stateDir,
+    label: "kosmos",
+    publisherKey: "11".repeat(32),
+  });
+  await setSubscriberPublisher({
+    stateDir,
+    label: "nuc",
+    publisherKey: "22".repeat(32),
+  });
+
+  assert.deepEqual(
+    parseSubscriberContact(
+      await readJson(path.join(stateDir, "publisher.contact.json")),
+    ),
+    {
+      publisherKey: "22".repeat(32),
+      label: "nuc",
+      requestedLocalPort: 0,
+    },
+  );
+  assert.deepEqual(await readFile(identityPath), identityBytes);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(stateDir)).mode & 0o777, 0o700);
+    assert.equal((await stat(identityPath)).mode & 0o777, 0o600);
+  }
+});
+
+test("publisher setup permits deny-all and rejects a different repeated topology", async () => {
+  const stateDir = await stateDirectory("publisher");
+  const options = {
+    stateDir,
+    displayName: "kosmos",
+    subscriberPublicKeys: [] as string[],
+    services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
+  };
+  const first = await setupPublisher(options);
+
+  assert.equal(first.created, true);
+  assert.deepEqual(
+    parsePublisherConfig(
+      await readJson(path.join(stateDir, "publisher.json")),
+    ).allow,
+    [],
+  );
+  assert.deepEqual(await setupPublisher(options), {
+    ...first,
+    created: false,
+  });
+  await assert.rejects(
+    () =>
+      setupPublisher({
+        ...options,
+        services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
+      }),
+    /topology|manifest|existing/i,
+  );
+});
+
+test("publisher allowlist and services replace independently without rotating its key", async () => {
+  const stateDir = await stateDirectory("publisher-update");
+  const setup = await setupPublisher({
+    stateDir,
+    displayName: "kosmos",
+    subscriberPublicKeys: ["11".repeat(32)],
+    services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
+  });
+  const configPath = path.join(stateDir, "publisher.json");
+  const seed = parsePublisherConfig(await readJson(configPath)).seed;
+
+  await setPublisherAllowlist({
+    stateDir,
+    subscriberPublicKeys: [],
+  });
+  await setPublisherServices({
+    stateDir,
+    services: [
+      { id: "navidrome", name: "Navidrome", targetPort: 4533 },
+    ],
+  });
+
+  assert.deepEqual(parsePublisherConfig(await readJson(configPath)), {
+    seed,
+    allow: [],
+  });
+  assert.deepEqual(
+    parsePublisherManifest(
+      await readJson(path.join(stateDir, "publisher.manifest.json")),
+    ).services,
+    [
+      {
+        id: "navidrome",
+        name: "Navidrome",
+        kind: "tcp",
+        targetPort: 4533,
+      },
+    ],
+  );
+  assert.equal(
+    (
+      await setupPublisher({
+        stateDir,
+        displayName: "kosmos",
+        subscriberPublicKeys: [],
+        services: [
+          { id: "navidrome", name: "Navidrome", targetPort: 4533 },
+        ],
+      })
+    ).publisherKey,
+    setup.publisherKey,
+  );
+
+  await setPublisherServices({ stateDir, services: [] });
+  assert.deepEqual(
+    parsePublisherManifest(
+      await readJson(path.join(stateDir, "publisher.manifest.json")),
+    ).services,
+    [],
+  );
+});
