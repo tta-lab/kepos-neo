@@ -1,3 +1,5 @@
+lefthook: npm exec -- lefthook
+
 pre-commit:
   commands:
     check:
