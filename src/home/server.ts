@@ -16,7 +16,6 @@ const registryPath = "/.well-known/kepos/services.json";
 const benchmarkPath = "/.well-known/kepos/benchmark";
 const benchmarkChunk = Buffer.alloc(64 * 1024);
 const maxBenchmarkBytes = 64 * 1024 * 1024;
-const defaultSshPort = 2222;
 const defaultHomeDirectory = fileURLToPath(new URL("../../home/", import.meta.url));
 
 export interface RunningHomeServer {
@@ -86,10 +85,9 @@ async function startHomeServerWithRegistry(
 ): Promise<RunningHomeServer> {
   const registryBody = `${JSON.stringify(registry, null, 2)}\n`;
   const registryEtag = `"${createHash("sha256").update(registryBody).digest("hex")}"`;
-  const [homeTemplate, homeCss, homeApp] = await Promise.all([
+  const [homeTemplate, homeCss] = await Promise.all([
     readFile(path.join(defaultHomeDirectory, "index.html"), "utf8"),
     readFile(path.join(defaultHomeDirectory, "styles.css")),
-    readFile(path.join(defaultHomeDirectory, "app.js")),
   ]);
 
   const server = createServer((request, response) => {
@@ -111,10 +109,6 @@ async function startHomeServerWithRegistry(
     }
     if (pathname === "/styles.css") {
       send(response, 200, "text/css; charset=utf-8", homeCss);
-      return;
-    }
-    if (pathname === "/app.js") {
-      send(response, 200, "text/javascript; charset=utf-8", homeApp);
       return;
     }
     if (pathname === registryPath) {
@@ -201,7 +195,7 @@ function renderHomeHtml(
           : `Published ${service.kind.toUpperCase()} service · ${escapeHtml(service.id)}`;
       const action =
         service.id === "ssh"
-          ? `<button type="button" class="btn btn-ghost btn-sm self-center whitespace-nowrap" data-copy-command="ssh -p ${defaultSshPort} 127.0.0.1">Copy SSH command</button>`
+          ? ""
           : `<a class="btn btn-ghost btn-sm self-center whitespace-nowrap" href="${serviceUrl(service.id, gatewayPort)}">Open</a>`;
       return `<li class="list-row gap-4 px-0 py-5 sm:grid-cols-[1fr_auto]">
             <div>

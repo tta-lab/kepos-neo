@@ -96,9 +96,10 @@ do not need a subscriber `--service` option or a separate local process.
 `--service id:local-port` remains for raw TCP services such as SSH. If 17480
 is occupied, select another gateway port:
 
-Home treats the reserved `ssh` service as raw TCP and presents a copyable
-`ssh -p 2222 127.0.0.1` command. Every other published service is presented
-as an HTTP link on the current gateway port.
+Home treats the reserved `ssh` service as raw TCP. Its local port belongs to
+the subscriber configuration, so the publisher Home does not guess or display
+an SSH command. Every other published service is presented as an HTTP link on
+the current gateway port.
 
 ```sh
 npm run kepos -- subscriber run \

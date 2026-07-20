@@ -54,6 +54,19 @@ test("production runtime has no P0, dogfood, or Hypertele path", async () => {
   }
 });
 
+test("dogfood publisher unit starts the canonical publisher CLI", async () => {
+  const service = await readFile(
+    "deploy/kepos-dogfood-publisher.service",
+    "utf8",
+  );
+
+  assert.match(
+    service,
+    /ExecStart=.*npm run kepos -- publisher run --state /,
+  );
+  assert.doesNotMatch(service, /dogfood:publisher/);
+});
+
 test("network research tools live outside the Kepos product repository", async () => {
   for (const extractedPath of [
     "src/tools",

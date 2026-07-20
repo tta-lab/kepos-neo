@@ -149,6 +149,7 @@ test("Home server serves the default Home HTML", async () => {
     assert.match(body, /Local Publisher/);
     assert.match(body, /Home/);
     assert.match(body, /\.well-known\/kepos\/services\.json/);
+    assert.doesNotMatch(body, /\/app\.js/);
   });
 });
 
@@ -174,20 +175,17 @@ test("Home server renders every Registry service", async () => {
       body,
       new RegExp(`href="http://navidrome\\.localhost:${home.port}/"`),
     );
-    assert.match(body, /data-copy-command="ssh -p 2222 127\.0\.0\.1"/);
+    assert.doesNotMatch(body, /data-copy-command=/);
   } finally {
     await home.close();
   }
 });
 
-test("Home server serves the local copy-button script", async () => {
+test("Home server does not serve an obsolete copy-button script", async () => {
   await withHome(async (home) => {
     const response = await fetch(`${home.url}/app.js`);
-    const body = await response.text();
 
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get("content-type"), "text/javascript; charset=utf-8");
-    assert.match(body, /navigator\.clipboard\.writeText/);
+    assert.equal(response.status, 404);
   });
 });
 
@@ -292,7 +290,7 @@ test("default Home source stays local, semantic, and responsive", async () => {
   assert.match(html, /max-w-/);
   assert.match(html, /sm:/);
   assert.match(html, /\{\{SERVICE_ROWS\}\}/);
-  assert.match(html, /<script\s+src=["']\/app\.js["']\s+defer><\/script>/i);
+  assert.doesNotMatch(html, /\/app\.js/i);
   assert.doesNotMatch(html, /https?:\/\/|data-theme=|gradient|\bcard\b/i);
 
   assert.match(inputCss, /@import\s+["']tailwindcss["'];/);
