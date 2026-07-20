@@ -1,72 +1,39 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { access, readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const checkerPath = path.resolve("scripts/check-runtime.mjs");
-
-async function withProject(
-  nodeVersion: string,
-  npmVersion: string,
-  run: (directory: string) => void,
-): Promise<void> {
-  const directory = await mkdtemp(path.join(tmpdir(), "kepos-runtime-"));
-  try {
-    await writeFile(path.join(directory, ".node-version"), `${nodeVersion}\n`);
-    await writeFile(
-      path.join(directory, "package.json"),
-      JSON.stringify({ packageManager: `npm@${npmVersion}` }),
-    );
-    run(directory);
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
-}
-
-function checkRuntime(directory: string, npmVersion: string) {
-  return spawnSync(process.execPath, [checkerPath], {
-    cwd: directory,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      npm_config_user_agent:
-        `npm/${npmVersion} node/${process.version} ${process.platform} ${process.arch}`,
-    },
-  });
-}
-
-test("runtime check accepts the project Node and npm versions", async () => {
-  await withProject(process.versions.node, "10.9.8", (directory) => {
-    const result = checkRuntime(directory, "10.9.8");
-    assert.equal(result.status, 0, result.stderr);
-  });
-});
-
-test("runtime check rejects a different Node version", async () => {
-  await withProject("0.0.0", "10.9.8", (directory) => {
-    const result = checkRuntime(directory, "10.9.8");
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /Node 0\.0\.0 required/u);
-  });
-});
-
-test("runtime check rejects a different npm version", async () => {
-  await withProject(process.versions.node, "0.0.0", (directory) => {
-    const result = checkRuntime(directory, "10.9.8");
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /npm 0\.0\.0 required/u);
-  });
-});
-
-test("project checks guard the runtime and Lefthook stays offline", async () => {
+test("package metadata owns the supported development runtime range", async () => {
   const packageJson = JSON.parse(
     await readFile("package.json", "utf8"),
-  ) as { scripts?: Record<string, string> };
-  assert.match(
-    packageJson.scripts?.check ?? "",
-    /^node scripts\/check-runtime\.mjs && /u,
+  ) as {
+    devEngines?: unknown;
+    engines?: unknown;
+    scripts?: Record<string, string>;
+  };
+  assert.deepEqual(packageJson.engines, {
+    node: ">=22 <23",
+    npm: ">=10 <11",
+  });
+  assert.deepEqual(packageJson.devEngines, {
+    runtime: {
+      name: "node",
+      version: ">=22 <23",
+      onFail: "error",
+    },
+    packageManager: {
+      name: "npm",
+      version: ">=10 <11",
+      onFail: "error",
+    },
+  });
+  assert.equal(
+    packageJson.scripts?.check,
+    "npm run typecheck && npm test && npm run check:home",
+  );
+  await assert.rejects(
+    () => access("scripts/check-runtime.mjs"),
+    (error: unknown) =>
+      (error as NodeJS.ErrnoException).code === "ENOENT",
   );
 
   const lefthook = await readFile("lefthook.yml", "utf8");

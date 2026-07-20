@@ -293,7 +293,10 @@ test("default Home source stays local, semantic, and responsive", async () => {
   assert.doesNotMatch(html, /\/app\.js/i);
   assert.doesNotMatch(html, /https?:\/\/|data-theme=|gradient|\bcard\b/i);
 
-  assert.match(inputCss, /@import\s+["']tailwindcss["'];/);
+  assert.match(
+    inputCss,
+    /@import\s+["']tailwindcss["']\s+source\(none\);/,
+  );
   assert.match(inputCss, /@plugin\s+["']daisyui["'];/);
   assert.match(inputCss, /@source\s+["']\.\/index\.html["'];/);
   assert.match(inputCss, /@source\s+["']\.\.\/src\/home\/server\.ts["'];/);
