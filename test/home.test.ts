@@ -148,6 +148,29 @@ test("Home server serves the default Home HTML", async () => {
   });
 });
 
+test("Home server renders every Registry service", async () => {
+  const home = await startHomeServer({
+    publisherKey,
+    displayName: "Kosmos & NUC",
+    services: [
+      { id: "navidrome", name: "Navidrome", kind: "tcp" },
+      { id: "ssh", name: "SSH", kind: "tcp" },
+    ],
+  });
+  try {
+    const response = await fetch(`${home.url}/`);
+    const body = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(body, /Kosmos &amp; NUC/);
+    assert.match(body, /3 available/);
+    assert.match(body, /Navidrome/);
+    assert.match(body, /SSH/);
+  } finally {
+    await home.close();
+  }
+});
+
 test("Home server serves the local compiled stylesheet", async () => {
   await withHome(async (home) => {
     const response = await fetch(`${home.url}/styles.css`);
@@ -244,11 +267,12 @@ test("default Home source stays local, semantic, and responsive", async () => {
   }
   assert.match(html, /max-w-/);
   assert.match(html, /sm:/);
-  assert.match(html, /class=["'][^"']*whitespace-nowrap[^"']*["'][^>]*>Available</i);
+  assert.match(html, /\{\{SERVICE_ROWS\}\}/);
   assert.doesNotMatch(html, /<script\b|https?:\/\/|data-theme=|gradient|\bcard\b/i);
 
   assert.match(inputCss, /@import\s+["']tailwindcss["'];/);
   assert.match(inputCss, /@plugin\s+["']daisyui["'];/);
   assert.match(inputCss, /@source\s+["']\.\/index\.html["'];/);
+  assert.match(inputCss, /@source\s+["']\.\.\/src\/home\/server\.ts["'];/);
   assert.doesNotMatch(inputCss, /daisyui\/theme|gradient/i);
 });

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <title>Local Publisher · Kepos</title>
+    <title>{{PUBLISHER_NAME}} · Kepos</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="min-h-screen bg-base-100 text-base-content antialiased">
@@ -14,7 +14,7 @@
           <span class="grid size-9 place-items-center border border-base-300 font-mono text-sm font-bold" aria-hidden="true">K</span>
           <div>
             <p class="text-xs font-semibold uppercase tracking-widest text-base-content/60">Kepos Home</p>
-            <p class="font-semibold">Local Publisher</p>
+            <p class="font-semibold">{{PUBLISHER_NAME}}</p>
           </div>
         </div>
         <div class="flex items-center gap-2 text-sm" aria-label="Publisher online">
@@ -36,16 +36,10 @@
       <section aria-labelledby="services-heading" class="mt-12 border-t border-base-300 pt-6 sm:mt-16">
         <div class="flex items-baseline justify-between gap-4">
           <h2 id="services-heading" class="text-sm font-bold uppercase tracking-wider">Services</h2>
-          <span class="font-mono text-xs text-base-content/50">1 available</span>
+          <span class="font-mono text-xs text-base-content/50">{{SERVICE_COUNT}}</span>
         </div>
         <ul class="list mt-3 border-y border-base-300">
-          <li class="list-row gap-4 px-0 py-5 sm:grid-cols-[1fr_auto]">
-            <div>
-              <h3 class="font-semibold">Home</h3>
-              <p class="mt-1 text-sm text-base-content/60">The default publisher page and service directory.</p>
-            </div>
-            <span class="self-center whitespace-nowrap font-mono text-xs uppercase text-success">Available</span>
-          </li>
+          {{SERVICE_ROWS}}
         </ul>
       </section>
 

@@ -123,6 +123,16 @@ failure.
 
 ## Benchmark cold bootstrap choices
 
+### Measurement caveat
+
+The 2026-07 bootstrap discovery, validation, and benchmark runs were launched
+before the Mac Kepos/Node process had a Clash `PROCESS-PATH,DIRECT` rule.
+Later live inspection showed Node UDP traffic could fall through to a
+Singapore proxy. The collected graph still records real HyperDHT responders
+and advertised adjacency, but locality-sensitive latency, failure-rate, and
+bootstrap-group comparisons must be repeated with verified `DIRECT` routing
+before they are used as a China-local network baseline.
+
 The benchmark alternates four bootstrap groups while keeping the client
 network and publisher fixed:
 

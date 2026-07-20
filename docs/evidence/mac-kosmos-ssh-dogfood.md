@@ -59,6 +59,39 @@ about 4.06 MB/s after first byte. The transient publisher and subscriber were
 stopped after the sample. The existing dogfood systemd publisher remained
 active and unchanged.
 
+This first hostname sample was later found to be affected by the Mac Clash
+TUN. The Kepos Node process did not yet have a process-path bypass, so Mihomo
+matched its UDP traffic as `漏网之鱼` and sent it through a Singapore proxy.
+The hostname routing, multiplexing, HTTP results, and transferred bytes remain
+valid functional evidence. The 438–456 ms RTT, request latency, throughput,
+hole-punch behavior, and bootstrap comparison are not a clean direct-path
+baseline.
+
+### Clash-DIRECT retest with Home, Navidrome, and SSH
+
+The Mac Clash source and generated configuration were updated to route the
+exact Node 22 executable used by Kepos through `PROCESS-PATH,DIRECT`. Live
+Mihomo connections for the publisher endpoint and DHT peers then reported
+`ProcessPath` with a single `DIRECT` chain instead of a proxy group.
+
+The current publisher exposed Navidrome on WSL loopback port 4533 and OpenSSH
+on WSL loopback port 22. One Mac subscriber exposed the hostname gateway on
+17480 and SSH on 2222. Home, Navidrome, and a real OpenSSH command all used
+the same outer ID.
+
+| Operation | Result | Time |
+| --- | --- | ---: |
+| Home | HTTP 200 | 0.180 s |
+| Navidrome `/ping` | HTTP 200 | 0.180 s |
+| OpenSSH command to `kosmos-wsl` | success | 0.924 s |
+| 16 MiB Home benchmark | HTTP 200, 7.40 MB/s | 2.267 s |
+
+The outer connection completed in 4.70 seconds and settled around 84–93 ms
+RTT during the SSH sample. This is the first Mac-to-kosmos-wsl measurement in
+this document that is verified as Clash `DIRECT`. It still passes through the
+enabled Clash TUN before the `DIRECT` rule; it does not pass through a Clash
+proxy node.
+
 ### LAN `auto`
 
 The publisher and subscriber both ran on the Mac with the normal public

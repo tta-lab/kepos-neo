@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   createHomeRegistry,
+  type HomeRegistry,
   type HomeRegistryService,
 } from "./registry.js";
 
@@ -78,14 +79,15 @@ export async function startHomeServer({
 }
 
 async function startHomeServerWithRegistry(
-  registry: { revision: number },
+  registry: HomeRegistry,
   port: number,
 ): Promise<RunningHomeServer> {
   const registryEtag = `"${registry.revision}"`;
-  const [homeHtml, homeCss] = await Promise.all([
-    readFile(path.join(defaultHomeDirectory, "index.html")),
+  const [homeTemplate, homeCss] = await Promise.all([
+    readFile(path.join(defaultHomeDirectory, "index.html"), "utf8"),
     readFile(path.join(defaultHomeDirectory, "styles.css")),
   ]);
+  const homeHtml = renderHomeHtml(homeTemplate, registry);
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -169,4 +171,43 @@ async function startHomeServerWithRegistry(
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   };
+}
+
+function renderHomeHtml(template: string, registry: HomeRegistry): string {
+  const publisherName = escapeHtml(registry.publisher.displayName);
+  const serviceCount = `${registry.services.length} available`;
+  const serviceRows = registry.services
+    .map((service) => {
+      const description =
+        service.id === "home"
+          ? "The default publisher page and service directory."
+          : `Published ${service.kind.toUpperCase()} service · ${escapeHtml(service.id)}`;
+      return `<li class="list-row gap-4 px-0 py-5 sm:grid-cols-[1fr_auto]">
+            <div>
+              <h3 class="font-semibold">${escapeHtml(service.name)}</h3>
+              <p class="mt-1 text-sm text-base-content/60">${description}</p>
+            </div>
+            <span class="self-center whitespace-nowrap font-mono text-xs uppercase text-success">Available</span>
+          </li>`;
+    })
+    .join("\n          ");
+
+  return template
+    .replaceAll("{{PUBLISHER_NAME}}", publisherName)
+    .replace("{{SERVICE_COUNT}}", serviceCount)
+    .replace("{{SERVICE_ROWS}}", serviceRows);
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character]!,
+  );
 }
