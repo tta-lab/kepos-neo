@@ -8,6 +8,8 @@
     "node": ">=22 <23"
   },
   "scripts": {
+    "check": "npm run typecheck && npm test && npm run check:home",
+    "check:home": "npm run build:home && git diff --exit-code -- home/styles.css",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test",
     "build:home": "tailwindcss -i home/styles.input.css -o home/styles.css --minify",
@@ -22,6 +24,7 @@
     "@tailwindcss/cli": "^4.3.2",
     "@types/node": "^26.1.1",
     "daisyui": "^5.6.16",
+    "lefthook": "^2.1.10",
     "tailwindcss": "^4.3.2",
     "tsx": "^4.23.0",
     "typescript": "^7.0.2"
