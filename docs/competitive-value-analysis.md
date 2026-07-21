@@ -26,14 +26,19 @@ MLP 的 person-first 首先是信息架构和使用路径，不是独立 Person 
 
 | 候选 | 最接近之处 | 淘汰原因 | 当前用途 |
 | --- | --- | --- | --- |
-| Hypertele | Holepunch、无账号、localhost TCP proxy、key allowlist | 一进程一服务、无 registry/local gateway、无 blind relay、无 library API | MLP V0 的可运行起点与技术 baseline |
+| Hypertele | Holepunch、无账号、localhost TCP proxy、key allowlist | 一进程一服务、无 registry/local gateway、无 blind relay、无 library API | 已完成的历史技术 baseline 与迁移来源；当前 runtime 不再依赖它 |
 | Magic Wormhole `fowl` | 无账号、named localhost TCP、E2E、direct/relay | 一次性 code、1:1 session、无长期 identity/family、双 NAT 通常经中心 TCP relay | 一次性分享和 UX baseline |
 | Headscale + Tailscale | 长期多人、成熟 desktop/headless、P2P/DERP | 常驻授权 controller、tailnet/network-first、localhost service 支持仍有缺口 | 控制器方案的成熟度 baseline |
 | ZeroTier self-host | 无 Central 账号、签名 device membership、多人 P2P network | controller authority、虚拟网络、无 localhost service；controller 商业 fork 有许可证限制 | device-network 模型 baseline |
 | Syncthing | 无账号、无 controller、长期多设备、direct/relay | 只做文件复制，device-first，无 service/session proxy | 身份、发现和 relay 原理参考 |
 | remote.it | named localhost service、多用户分享、本地 endpoint | 云账号、中心授权、闭源核心 | 最接近的 service UX baseline |
 
-MLP V0 先直接使用固定版本的 Hypertele，不 fork。第一个 target 是极小的静态 Blog Hello World；第二个 target 才是多人 Navidrome。若场景成立，优先增加 publisher service registry 与本地 HTTP gateway；允许先用每服务一个进程。只有连接和资源测量证明必要时才实现 multiplex。上游缺少 LICENSE 文件不阻塞 npm 依赖测试，后续复制或 fork 时保留其 MIT 声明与来源记录。
+历史 P0 曾直接使用固定版本的 Hypertele。随后已经把有价值的 transport、
+observability 和 route control 迁入 Kepos，删除 Hypertele runtime，并实现
+publisher service registry、hostname gateway 和一条连接上的 Protomux 多服务。
+当前验证目标是 Android subscriber 通过 Navic 使用远端 Navidrome，而不是
+继续扩展旧 Hypertele P0。迁移来源与许可证边界记录在
+[`hypertele-provenance.md`](./hypertele-provenance.md)。
 
 若放弃“无常驻授权 controller”，应停止 Kepos Neo，优先采用 Headscale。若放弃长期多人 trust，应停止 Kepos Neo，优先采用 `fowl`。
 
