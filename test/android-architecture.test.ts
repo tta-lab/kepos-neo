@@ -37,12 +37,22 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.deepEqual(rootPackage.workspaces, ["packages/*"]);
   assert.equal(
     rootPackage.scripts?.["android:fetch-bare-kit"],
-    "node scripts/fetch-bare-kit.mjs",
+    "tsx scripts/fetch-bare-kit.ts",
   );
   assert.equal(
     rootPackage.scripts?.["android:assemble"],
     "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug",
   );
+  assert.equal(
+    rootPackage.scripts?.["android:bundle"],
+    "npm run build:packages && tsx scripts/build-android-worklet.ts",
+  );
+  assert.notEqual(
+    await readProjectFile("scripts/fetch-bare-kit.ts"),
+    null,
+  );
+  assert.equal(await readProjectFile("scripts/fetch-bare-kit.mjs"), null);
+  assert.equal(await readProjectFile("scripts/fetch-bare-kit.d.mts"), null);
   assert.equal(
     rootPackage.scripts?.["android:check"],
     "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug assembleDebug",

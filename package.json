@@ -25,8 +25,8 @@
     }
   },
   "scripts": {
-    "android:fetch-bare-kit": "node scripts/fetch-bare-kit.mjs",
-    "android:bundle": "npm run build:packages && node scripts/build-android-worklet.mjs",
+    "android:fetch-bare-kit": "tsx scripts/fetch-bare-kit.ts",
+    "android:bundle": "npm run build:packages && tsx scripts/build-android-worklet.ts",
     "android:assemble": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug",
     "android:check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug assembleDebug",
     "build:packages": "tsc -b --clean packages/bare-host-protocol packages/kepos-android-worklet && tsc -b packages/bare-host-protocol packages/kepos-android-worklet",

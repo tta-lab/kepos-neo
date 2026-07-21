@@ -11,6 +11,34 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import extractZip from "extract-zip";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
+export interface BareKitRelease {
+  version?: string;
+  url?: string;
+  size: number;
+  sha256: string;
+}
+
+interface DownloadResponse {
+  ok: boolean;
+  status: number;
+  body: Readable | ReadableStream<Uint8Array> | null;
+}
+
+type DownloadFetch = (
+  input: string | URL,
+  init?: RequestInit,
+) => Promise<DownloadResponse>;
+
+interface ArchiveDownload {
+  url: string;
+  partialArchive: string;
+}
+
+interface Aria2cDownload extends ArchiveDownload {
+  proxyUrl?: string;
+  spawnImpl?: typeof spawn;
+}
+
 export const BARE_KIT = Object.freeze({
   version: "2.3.0",
   url: "https://github.com/holepunchto/bare-kit/releases/download/v2.3.0/prebuilds.zip",
@@ -18,7 +46,9 @@ export const BARE_KIT = Object.freeze({
   sha256: "a386063fa405b0bb4967490e84745075f007f95359c9871c5b7a45c18c2f49e2",
 });
 
-export function proxyUrlFromEnvironment(environment) {
+export function proxyUrlFromEnvironment(
+  environment: NodeJS.ProcessEnv,
+): string | undefined {
   return (
     environment.HTTPS_PROXY ||
     environment.https_proxy ||
@@ -28,7 +58,10 @@ export function proxyUrlFromEnvironment(environment) {
   );
 }
 
-export async function verifyArchive(archivePath, expected = BARE_KIT) {
+export async function verifyArchive(
+  archivePath: string,
+  expected: BareKitRelease = BARE_KIT,
+): Promise<void> {
   const archive = await stat(archivePath);
   if (archive.size !== expected.size) {
     throw new Error(
@@ -51,13 +84,18 @@ export async function ensureArchive({
   expected = BARE_KIT,
   fetchImpl = fetch,
   downloadImpl,
-}) {
+}: {
+  archivePath: string;
+  expected?: BareKitRelease;
+  fetchImpl?: DownloadFetch;
+  downloadImpl?: (options: ArchiveDownload) => Promise<boolean>;
+}): Promise<void> {
   try {
     await access(archivePath);
     await verifyArchive(archivePath, expected);
     return;
   } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
+    if (!hasErrorCode(error, "ENOENT")) throw error;
   }
 
   const parent = path.dirname(archivePath);
@@ -76,7 +114,7 @@ export async function ensureArchive({
     return;
   }
 
-  let lastError;
+  let lastError: unknown;
   for (let attempt = 1; attempt <= 5; attempt++) {
     let offset = await fileSize(partialArchive);
     if (offset > expected.size) {
@@ -113,7 +151,11 @@ export async function ensureArchive({
   throw lastError;
 }
 
-export function aria2cArguments({ url, partialArchive, proxyUrl }) {
+export function aria2cArguments({
+  url,
+  partialArchive,
+  proxyUrl,
+}: Aria2cDownload): string[] {
   const arguments_ = [
     "--continue=true",
     "--file-allocation=none",
@@ -135,8 +177,8 @@ export async function downloadWithAria2c({
   partialArchive,
   proxyUrl,
   spawnImpl = spawn,
-}) {
-  return await new Promise((resolve, reject) => {
+}: Aria2cDownload): Promise<boolean> {
+  return await new Promise<boolean>((resolve, reject) => {
     const process = spawnImpl(
       "aria2c",
       aria2cArguments({ url, partialArchive, proxyUrl }),
@@ -146,7 +188,7 @@ export async function downloadWithAria2c({
     process.once("error", (error) => {
       if (settled) return;
       settled = true;
-      if (error.code === "ENOENT") {
+      if (hasErrorCode(error, "ENOENT")) {
         resolve(false);
         return;
       }
@@ -168,7 +210,11 @@ export async function downloadWithAria2c({
   });
 }
 
-async function fetchDownloadSource(fetchImpl, url, offset) {
+async function fetchDownloadSource(
+  fetchImpl: DownloadFetch,
+  url: string,
+  offset: number,
+): Promise<{ body: Readable; status: number }> {
   const response = await fetchImpl(url, {
     headers: offset > 0 ? { range: `bytes=${offset}-` } : undefined,
   });
@@ -179,29 +225,36 @@ async function fetchDownloadSource(fetchImpl, url, offset) {
     body:
       response.body instanceof Readable
         ? response.body
-        : Readable.fromWeb(response.body),
+        : Readable.from(response.body),
     status: response.status,
   };
 }
 
-async function fileSize(filePath) {
+async function fileSize(filePath: string): Promise<number> {
   try {
     return (await stat(filePath)).size;
   } catch (error) {
-    if (error?.code === "ENOENT") return 0;
+    if (hasErrorCode(error, "ENOENT")) return 0;
     throw error;
   }
 }
 
-async function delay(milliseconds) {
-  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export async function installAndroidPrebuild({
   archivePath,
   destination,
   extractImpl = extractZip,
-}) {
+}: {
+  archivePath: string;
+  destination: string;
+  extractImpl?: (
+    archivePath: string,
+    options: { dir: string },
+  ) => Promise<void>;
+}): Promise<void> {
   if (await isAndroidPrebuild(destination)) return;
 
   const parent = path.dirname(destination);
@@ -219,7 +272,7 @@ export async function installAndroidPrebuild({
   }
 }
 
-async function isAndroidPrebuild(directory) {
+async function isAndroidPrebuild(directory: string): Promise<boolean> {
   try {
     await access(path.join(directory, "classes.jar"));
     await access(
@@ -227,12 +280,12 @@ async function isAndroidPrebuild(directory) {
     );
     return true;
   } catch (error) {
-    if (error?.code === "ENOENT") return false;
+    if (hasErrorCode(error, "ENOENT")) return false;
     throw error;
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   const repository = fileURLToPath(new URL("..", import.meta.url));
   const archivePath = path.join(
     repository,
@@ -262,11 +315,11 @@ async function main() {
 }
 
 function fetchThroughProxy(
-  input,
-  proxyUrl,
-  init = {},
+  input: string | URL,
+  proxyUrl: string,
+  init: RequestInit = {},
   redirectsRemaining = 5,
-) {
+): Promise<DownloadResponse> {
   const url = new URL(input);
   return new Promise((resolve, reject) => {
     const request = https.get(
@@ -309,6 +362,15 @@ function fetchThroughProxy(
     });
     request.once("error", reject);
   });
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === code
+  );
 }
 
 if (

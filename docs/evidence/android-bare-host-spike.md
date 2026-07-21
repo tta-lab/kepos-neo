@@ -8,7 +8,7 @@ Bare Kit: 2.3.0
 
 ## Build inputs
 
-The Bare Kit release archive is pinned by `scripts/fetch-bare-kit.mjs`:
+The Bare Kit release archive is pinned by `scripts/fetch-bare-kit.ts`:
 
 - Size: `371197422` bytes
 - SHA-256: `a386063fa405b0bb4967490e84745075f007f95359c9871c5b7a45c18c2f49e2`

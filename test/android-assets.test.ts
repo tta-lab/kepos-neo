@@ -12,36 +12,8 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { test } from "node:test";
 
-interface BareKitFetcher {
-  aria2cArguments(options: {
-    url: string;
-    partialArchive: string;
-    proxyUrl?: string;
-  }): string[];
-  ensureArchive(options: {
-    archivePath: string;
-    expected: { size: number; sha256: string; url?: string };
-    fetchImpl: typeof fetch;
-  }): Promise<void>;
-  proxyUrlFromEnvironment(environment: NodeJS.ProcessEnv): string | undefined;
-  installAndroidPrebuild(options: {
-    archivePath: string;
-    destination: string;
-    extractImpl: (
-      archivePath: string,
-      options: { dir: string },
-    ) => Promise<void>;
-  }): Promise<void>;
-  verifyArchive(
-    archivePath: string,
-    expected: { size: number; sha256: string },
-  ): Promise<void>;
-}
-
 test("Bare Kit fetcher gives aria2c a resumable parallel download", async () => {
-  const fetcher = (await import(
-    "../scripts/fetch-bare-kit.mjs"
-  )) as BareKitFetcher;
+  const fetcher = await import("../scripts/fetch-bare-kit.js");
 
   assert.deepEqual(
     fetcher.aria2cArguments({
@@ -64,9 +36,7 @@ test("Bare Kit fetcher gives aria2c a resumable parallel download", async () => 
 });
 
 test("Bare Kit fetcher honors the standard HTTPS proxy environment", async () => {
-  const fetcher = (await import(
-    "../scripts/fetch-bare-kit.mjs"
-  )) as BareKitFetcher;
+  const fetcher = await import("../scripts/fetch-bare-kit.js");
 
   assert.equal(
     fetcher.proxyUrlFromEnvironment({
@@ -79,7 +49,7 @@ test("Bare Kit fetcher honors the standard HTTPS proxy environment", async () =>
 });
 
 test("Bare Kit fetcher is a checked-in build input", async () => {
-  const script = new URL("../scripts/fetch-bare-kit.mjs", import.meta.url);
+  const script = new URL("../scripts/fetch-bare-kit.ts", import.meta.url);
 
   await assert.doesNotReject(access(script));
 });
@@ -88,9 +58,7 @@ test("Bare Kit fetcher downloads and verifies a missing archive", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "kepos-bare-kit-"));
   try {
     const archivePath = path.join(directory, "prebuilds.zip");
-    const fetcher = (await import(
-      "../scripts/fetch-bare-kit.mjs"
-    )) as BareKitFetcher;
+    const fetcher = await import("../scripts/fetch-bare-kit.js");
     let requestedUrl: string | URL | Request | undefined;
 
     await fetcher.ensureArchive({
@@ -118,9 +86,7 @@ test("Bare Kit fetcher accepts a Node download stream", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "kepos-bare-kit-"));
   try {
     const archivePath = path.join(directory, "prebuilds.zip");
-    const fetcher = (await import(
-      "../scripts/fetch-bare-kit.mjs"
-    )) as BareKitFetcher;
+    const fetcher = await import("../scripts/fetch-bare-kit.js");
 
     await fetcher.ensureArchive({
       archivePath,
@@ -147,9 +113,7 @@ test("Bare Kit fetcher resumes a reset download", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "kepos-bare-kit-"));
   try {
     const archivePath = path.join(directory, "prebuilds.zip");
-    const fetcher = (await import(
-      "../scripts/fetch-bare-kit.mjs"
-    )) as BareKitFetcher;
+    const fetcher = await import("../scripts/fetch-bare-kit.js");
     const requestedRanges: Array<string | null> = [];
 
     await fetcher.ensureArchive({
@@ -186,9 +150,7 @@ test("Bare Kit fetcher resumes a reset download", async () => {
 });
 
 test("Bare Kit fetcher exposes archive verification", async () => {
-  const fetcher = (await import("../scripts/fetch-bare-kit.mjs")) as {
-    verifyArchive?: unknown;
-  };
+  const fetcher = await import("../scripts/fetch-bare-kit.js");
 
   assert.equal(typeof fetcher.verifyArchive, "function");
 });
@@ -198,9 +160,7 @@ test("Bare Kit archive verification accepts exact bytes", async () => {
   try {
     const archivePath = path.join(directory, "prebuilds.zip");
     await writeFile(archivePath, "hello");
-    const fetcher = (await import(
-      "../scripts/fetch-bare-kit.mjs"
-    )) as BareKitFetcher;
+    const fetcher = await import("../scripts/fetch-bare-kit.js");
 
     await assert.doesNotReject(
       fetcher.verifyArchive(archivePath, {
@@ -220,9 +180,7 @@ test("Bare Kit fetcher reuses a verified cached archive", async () => {
     const archivePath = path.join(directory, "prebuilds.zip");
     await writeFile(archivePath, "hello");
     let fetched = false;
-    const fetcher = (await import(
-      "../scripts/fetch-bare-kit.mjs"
-    )) as BareKitFetcher;
+    const fetcher = await import("../scripts/fetch-bare-kit.js");
 
     await fetcher.ensureArchive({
       archivePath,
@@ -247,9 +205,7 @@ test("Bare Kit installer exposes only the Android prebuild to Gradle", async () 
   const directory = await mkdtemp(path.join(tmpdir(), "kepos-bare-kit-"));
   try {
     const destination = path.join(directory, "libs", "bare-kit");
-    const fetcher = (await import(
-      "../scripts/fetch-bare-kit.mjs"
-    )) as BareKitFetcher;
+    const fetcher = await import("../scripts/fetch-bare-kit.js");
 
     await fetcher.installAndroidPrebuild({
       archivePath: path.join(directory, "prebuilds.zip"),

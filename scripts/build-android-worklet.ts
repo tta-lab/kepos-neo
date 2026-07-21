@@ -38,9 +38,9 @@ await run("bare-link", [
 
 process.stdout.write("Android Worklet bundle and linked addons are ready\n");
 
-async function run(command, arguments_) {
+async function run(command: string, arguments_: string[]): Promise<void> {
   const executable = path.join(repository, "node_modules", ".bin", command);
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const child = spawn(executable, arguments_, {
       cwd: repository,
       stdio: "inherit",
