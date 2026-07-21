@@ -32,6 +32,16 @@ Pressing Back finished `MainActivity`. The foreground service remained active an
 
 Pressing Stop closed port 17482 and changed the UI to `stopped`. After the Activity unbound, the service record disappeared.
 
+The same lifecycle is now a repeatable instrumentation gate:
+
+```sh
+npm run android:device-check
+```
+
+`WorkletLifecycleTest` starts the foreground service, completes an IPC ping, checks the loopback response, recreates and then closes the Activity, repeats IPC and HTTP checks against the same runtime ID and URL, and verifies that explicit Stop closes the listener. It passed on the Pixel 7a above.
+
+Runtime failures are recoverable without recreating the service. Manual Start retries immediately from `failed`; unattended failures use one queued retry with delays of 1, 2, 4, 8, 16, then at most 30 seconds. Explicit Stop cancels a queued retry. JVM tests cover immediate manual recovery, the capped delay sequence, duplicate failure events, and cancellation.
+
 ## Failures found by the device gate
 
 The first build called `IPC.read()` before starting the Worklet. Bare Kit aborted through CheckJNI because its native IPC buffer was not ready.

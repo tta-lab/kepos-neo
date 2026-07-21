@@ -91,6 +91,44 @@ class BareRuntimeTest {
     assertEquals(1, session.closes)
   }
 
+  @Test
+  fun pingCompletesOnlyAfterTheCurrentWorkletResponds() {
+    val session = FakeRuntimeSession()
+    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
+    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
+    session.emit(
+      EventEnvelope(
+        1,
+        "event",
+        "runtime.stateChanged",
+        buildJsonObject {
+          put("state", "running")
+          put("runtimeId", "runtime-1")
+          put("echoUrl", "http://127.0.0.1:17482/")
+        },
+      ),
+    )
+
+    val ping = runtime.ping()
+    val request = session.writes.single() as RequestEnvelope
+    assertEquals("ping", request.method)
+    assertFalse(ping.isDone)
+
+    session.emit(
+      ResponseEnvelope(
+        1,
+        "response",
+        request.id,
+        buildJsonObject {
+          put("pong", true)
+          put("runtimeId", "runtime-1")
+        },
+      ),
+    )
+
+    assertEquals("runtime-1", ping.get(1, TimeUnit.SECONDS).runtimeId)
+  }
+
   private class FakeRuntimeSession : RuntimeSession {
     private val codec = IpcFrameCodec()
     private lateinit var onData: (ByteArray) -> Unit

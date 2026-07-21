@@ -29,6 +29,7 @@
     "android:bundle": "npm run build:packages && tsx scripts/build-android-worklet.ts",
     "android:assemble": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug",
     "android:check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug assembleDebug",
+    "android:device-check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDebugAndroidTest",
     "build:packages": "tsc -b --clean packages/bare-host-protocol packages/kepos-android-worklet && tsc -b packages/bare-host-protocol packages/kepos-android-worklet",
     "check": "npm run build:packages && npm run typecheck && npm run test:coverage && npm run check:home",
     "check:home": "npm run build:home && git diff --exit-code -- home/styles.css",

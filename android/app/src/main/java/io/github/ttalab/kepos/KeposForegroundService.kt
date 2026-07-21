@@ -11,12 +11,14 @@ import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import io.github.ttalab.barekit.host.BareKitRuntimeSession
 import io.github.ttalab.barekit.host.BareRuntime
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 import io.github.ttalab.barekit.host.RuntimeTimeoutScheduler
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArraySet
 
 class KeposForegroundService : Service() {
@@ -32,6 +34,14 @@ class KeposForegroundService : Service() {
     },
   )
   private val binder = LocalBinder()
+  private val restartController = RuntimeRestartController(
+    schedule = { delayMillis, task ->
+      val runnable = Runnable(task)
+      handler.postDelayed(runnable, delayMillis)
+      AutoCloseable { handler.removeCallbacks(runnable) }
+    },
+    startRuntime = { startRuntime() },
+  )
   private var foreground = false
   private lateinit var runtimeObserver: AutoCloseable
 
@@ -39,6 +49,7 @@ class KeposForegroundService : Service() {
     super.onCreate()
     createNotificationChannel()
     runtimeObserver = runtime.observe { snapshot ->
+      restartController.stateChanged(snapshot.state)
       handler.post {
         listeners.forEach { it(snapshot) }
         if (foreground) {
@@ -56,28 +67,47 @@ class KeposForegroundService : Service() {
     }
     startForeground(NOTIFICATION_ID, notification(runtime.snapshot()))
     foreground = true
-    if (runtime.snapshot().state == RuntimeState.STOPPED) {
-      runtime.start(assets.open(WORKLET_ASSET))
-    }
+    restartController.manualStart(runtime.snapshot().state)
     return START_STICKY
   }
 
   override fun onBind(intent: Intent?): IBinder = binder
 
   override fun onDestroy() {
+    restartController.close()
     runtimeObserver.close()
     runtime.close()
     super.onDestroy()
   }
 
   private fun stopRuntime() {
-    runtime.stop().whenComplete { _, _ ->
-      handler.post {
-        foreground = false
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-      }
+    restartController.stop()
+    if (
+      runtime.snapshot().state == RuntimeState.STOPPED ||
+      runtime.snapshot().state == RuntimeState.FAILED
+    ) {
+      finishServiceStop()
+      return
     }
+    runtime.stop().whenComplete { _, _ ->
+      handler.post { finishServiceStop() }
+    }
+  }
+
+  private fun startRuntime() {
+    val state = runtime.snapshot().state
+    if (state != RuntimeState.STOPPED && state != RuntimeState.FAILED) return
+    try {
+      runtime.start(assets.open(WORKLET_ASSET))
+    } catch (error: Throwable) {
+      Log.e(LOG_TAG, "Bare Worklet failed to start", error)
+    }
+  }
+
+  private fun finishServiceStop() {
+    foreground = false
+    stopForeground(STOP_FOREGROUND_REMOVE)
+    stopSelf()
   }
 
   private fun createNotificationChannel() {
@@ -115,6 +145,8 @@ class KeposForegroundService : Service() {
   inner class LocalBinder : Binder() {
     fun snapshot(): RuntimeSnapshot = runtime.snapshot()
 
+    fun ping(): CompletableFuture<RuntimeSnapshot> = runtime.ping()
+
     fun observe(listener: (RuntimeSnapshot) -> Unit): AutoCloseable {
       listeners += listener
       listener(runtime.snapshot())
@@ -128,6 +160,7 @@ class KeposForegroundService : Service() {
     private const val NOTIFICATION_CHANNEL = "kepos-runtime"
     private const val NOTIFICATION_ID = 17480
     private const val WORKLET_ASSET = "kepos.bundle"
+    private const val LOG_TAG = "KeposRuntime"
 
     fun start(context: Context) {
       context.startForegroundService(

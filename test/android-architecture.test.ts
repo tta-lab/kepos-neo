@@ -33,6 +33,7 @@ test("Android host boundaries are explicit extraction seams", async () => {
   const hostBuild = await readProjectFile(
     "android/barekit-host/build.gradle.kts",
   );
+  const workflow = await readProjectFile(".github/workflows/check.yml");
 
   assert.deepEqual(rootPackage.workspaces, ["packages/*"]);
   assert.equal(
@@ -57,6 +58,10 @@ test("Android host boundaries are explicit extraction seams", async () => {
     rootPackage.scripts?.["android:check"],
     "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug assembleDebug",
   );
+  assert.equal(
+    rootPackage.scripts?.["android:device-check"],
+    "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDebugAndroidTest",
+  );
   assert.notEqual(protocolPackage, null, "missing pure host protocol package");
   assert.notEqual(workletPackage, null, "missing product Worklet package");
   assert.match(settings!, /include\(":app", ":barekit-host"\)/);
@@ -67,6 +72,7 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.match(appManifest!, /foregroundServiceType="specialUse"/);
   assert.match(foregroundService!, /private val runtime = BareRuntime/);
   assert.match(foregroundService!, /START_STICKY/);
+  assert.doesNotMatch(workflow!, /uses: actions\/(?:checkout|setup-node)@v\d/);
   assert.ok(
     bareKitSession!.indexOf("worklet.start") < bareKitSession!.indexOf("armRead()"),
     "Bare Kit IPC reads must begin after the Worklet starts",

@@ -38,6 +38,7 @@ class BareRuntime(
   private var stopRequestId: Long? = null
   private var stopFuture: CompletableFuture<RuntimeSnapshot>? = null
   private var stopTimeout: AutoCloseable? = null
+  private val pingFutures = mutableMapOf<Long, CompletableFuture<RuntimeSnapshot>>()
   private val observers = linkedSetOf<(RuntimeSnapshot) -> Unit>()
 
   fun snapshot(): RuntimeSnapshot = state.snapshot()
@@ -82,6 +83,22 @@ class BareRuntime(
       throw error
     }
     return state.snapshot()
+  }
+
+  @Synchronized
+  fun ping(): CompletableFuture<RuntimeSnapshot> {
+    val current = state.snapshot()
+    check(current.state == RuntimeState.RUNNING) {
+      "cannot ping a runtime from ${current.state}"
+    }
+    val runtimeId = checkNotNull(current.runtimeId)
+    val request = requests.request("ping")
+    val future = CompletableFuture<RuntimeSnapshot>()
+    pingFutures[request.id] = future
+    checkNotNull(session).write(codec.encode(request)) { error ->
+      fail(runtimeId, error)
+    }
+    return future
   }
 
   @Synchronized
@@ -153,6 +170,7 @@ class BareRuntime(
 
   private fun receiveResponse(runtimeId: String, response: ResponseEnvelope) {
     requests.accept(response)
+    pingFutures.remove(response.id)?.complete(state.snapshot())
     if (response.id == stopRequestId) finishStop(runtimeId)
   }
 
@@ -186,6 +204,8 @@ class BareRuntime(
     stopFuture?.completeExceptionally(error)
     stopFuture = null
     stopRequestId = null
+    pingFutures.values.forEach { it.completeExceptionally(error) }
+    pingFutures.clear()
   }
 
   private fun closeSession() {
