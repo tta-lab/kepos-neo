@@ -25,7 +25,7 @@ test("Home Registry binds services to one publisher key", () => {
       {
         id: "home",
         name: "Home",
-        kind: "http",
+        kind: "tcp",
       },
     ],
   });
@@ -48,7 +48,7 @@ test("Home Registry rejects a malformed publisher key", () => {
   );
 });
 
-test("Home Registry treats only ssh as TCP without exposing publisher-local targets", () => {
+test("Home Registry reports every service as TCP without exposing publisher-local targets", () => {
   const registry = createHomeRegistry({
     publisherKey,
     displayName: "kosmos",
@@ -63,8 +63,8 @@ test("Home Registry treats only ssh as TCP without exposing publisher-local targ
     revision: 1,
     publisher: { displayName: "kosmos", publisherKey },
     services: [
-      { id: "home", name: "Home", kind: "http" },
-      { id: "navidrome", name: "Navidrome", kind: "http" },
+      { id: "home", name: "Home", kind: "tcp" },
+      { id: "navidrome", name: "Navidrome", kind: "tcp" },
       { id: "ssh", name: "SSH", kind: "tcp" },
     ],
   });
@@ -175,6 +175,7 @@ test("Home server renders every Registry service", async () => {
       body,
       new RegExp(`href="http://navidrome\\.localhost:${home.port}/"`),
     );
+    assert.doesNotMatch(body, /href="http:\/\/ssh\.localhost/);
     assert.doesNotMatch(body, /data-copy-command=/);
   } finally {
     await home.close();
