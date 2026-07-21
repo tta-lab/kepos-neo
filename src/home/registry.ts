@@ -1,7 +1,7 @@
 export interface HomeRegistryService {
   id: string;
   name: string;
-  kind: "http" | "tcp";
+  kind: "tcp";
 }
 
 export interface HomeRegistry {
@@ -58,10 +58,7 @@ export function createHomeRegistry(
       if (service.kind !== "tcp") {
         throw new Error(`service ${index} kind must be tcp`);
       }
-      return {
-        ...service,
-        kind: service.id === "ssh" ? "tcp" : "http",
-      };
+      return service;
     },
   );
 
@@ -76,7 +73,7 @@ export function createHomeRegistry(
       {
         id: "home",
         name: "Home",
-        kind: "http",
+        kind: "tcp",
       },
       ...services,
     ],
