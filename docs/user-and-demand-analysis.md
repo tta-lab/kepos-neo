@@ -91,7 +91,9 @@ owner 一次 trust 多位家庭成员
 
 Navidrome 是 HTTP/TCP 服务，适合当前 TCP proxy。Kepos 提供网络可达性和 family 身份边界，不替代 Navidrome 自己的用户、媒体权限和应用认证。
 
-MLP 仍只支持桌面客户端，因此不能用手机音乐播放作为首版成功标准。
+Android 已确定只做 subscriber。当前移动端成功标准是让 Navic 通过固定
+localhost 地址使用远端 Navidrome，并在 UI 关闭、锁屏和网络切换后保持或
+恢复代理；Kepos 不承担音频播放。
 
 ## 4. Jobs to be done
 
