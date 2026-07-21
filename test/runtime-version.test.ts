@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-test("package metadata owns the supported development runtime range", async () => {
+test("package metadata owns the supported runtime and canonical checks", async () => {
   const packageJson = JSON.parse(
     await readFile("package.json", "utf8"),
   ) as {
@@ -28,8 +28,14 @@ test("package metadata owns the supported development runtime range", async () =
   });
   assert.equal(
     packageJson.scripts?.check,
-    "npm run typecheck && npm test && npm run check:home",
+    "npm run typecheck && npm run test:coverage && npm run check:home",
   );
+  const coverage = packageJson.scripts?.["test:coverage"] ?? "";
+  assert.match(coverage, /--test-coverage-include="src\/\*\*\/\*\.ts"/u);
+  assert.match(coverage, /--test-coverage-lines=90/u);
+  assert.match(coverage, /--test-coverage-branches=80/u);
+  assert.match(coverage, /--test-coverage-functions=90/u);
+  assert.match(coverage, /--test-reporter-destination=lcov\.info/u);
   await assert.rejects(
     () => access("scripts/check-runtime.mjs"),
     (error: unknown) =>
