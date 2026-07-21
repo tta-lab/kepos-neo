@@ -232,15 +232,15 @@ MLP 不看下载量，先看任务是否完成：
 
 ## 10. 当前判断
 
-最合理的验证顺序是：
+当前验证顺序是：
 
-1. 在单台桌面上用一个极小的本地静态 Blog 验证 Hypertele Hello
-   World。
-2. 在同一桌面运行两份独立 client identity，验证 controllerless
-   one-to-many 配置语义；不把它当跨设备网络证据。
-3. 完成 Android client-only spike 后，用桌面宽带与手机蜂窝网络验证
-   第一次真实跨设备、跨局域网 direct path。
-4. 用 Navic + Navidrome 验证锁屏播放、持续流量和网络切换。
-5. 用 Terraria 或 RetroArch 验证人与人之间的真实活动。
-6. 观察用户是否把 Kepos 理解为“打开某个人的本地页面和服务”，而不是“配置另一张网络”。
-7. 再决定它是通用受信服务分享产品，还是游戏等垂直会话产品。
+1. 已完成：用 Hypertele P0 验证持久 key、allowlist、Home 和多 client
+   语义；该 runtime 已迁移并删除。
+2. 已完成：用 Kepos 自有 HyperDHT/Protomux runtime 在 Mac 与
+   kosmos-wsl 间跑通 Home、Navidrome、SSH、multiplex 和重连。
+3. 下一步：完成 Android subscriber-only host spike，证明 Kotlin
+   foreground service 能持续拥有 Bare Kit Worklet 和 localhost gateway。
+4. 随后用 Navic + Navidrome 验证锁屏播放、持续流量、Wi-Fi/蜂窝切换
+   和固定 localhost URL。
+5. 有真实移动 dogfood 后，再决定优先做 macOS 桌面壳、扩展更多服务，
+   还是验证多 subscriber 与受信分享场景。

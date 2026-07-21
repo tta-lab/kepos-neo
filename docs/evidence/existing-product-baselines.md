@@ -33,7 +33,7 @@ These products can all move bytes. The useful comparison is what must remain
 online, which entity grants access, whether trust survives a session, and
 whether the user is joining a network or opening an explicit service.
 
-## Reproducible `fowl` probe
+## Recorded `fowl` probe
 
 The original probe used `uvx` without changing this repository:
 
@@ -48,12 +48,17 @@ Sanitized command shape:
 
 ```sh
 python3 -m http.server 18080 --bind 127.0.0.1 --directory docs
-uvx --from fowl fowl --no-logo --clearnet \
+uvx --from 'fowl==25.10.0' fowl --no-logo --clearnet \
   --remote home:18080:listen=18081
-uvx --from fowl fowl --no-logo --clearnet \
+uvx --from 'fowl==25.10.0' fowl --no-logo --clearnet \
   --local home:18081:remote-connect=18080 <one-time-code>
 curl --fail http://127.0.0.1:18081/mlp-decisions.md
 ```
+
+The commands pin the top-level `fowl` release. The original resolver lock was
+not retained, so they do not guarantee the exact recorded
+`magic-wormhole==0.24.0` transitive environment. Reproducing that environment
+exactly would require a preserved `uv.lock` or equivalent constraint set.
 
 The invite side allowed a named `home` service. The join side consumed the
 generated code and exposed the paired loopback listener. The request returned
