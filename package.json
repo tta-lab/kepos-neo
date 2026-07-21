@@ -2,6 +2,9 @@
   "name": "kepos-neo",
   "version": "0.0.0",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "npm@10.9.8",
@@ -22,11 +25,16 @@
     }
   },
   "scripts": {
-    "check": "npm run typecheck && npm run test:coverage && npm run check:home",
+    "android:fetch-bare-kit": "node scripts/fetch-bare-kit.mjs",
+    "android:bundle": "npm run build:packages && node scripts/build-android-worklet.mjs",
+    "android:assemble": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug",
+    "android:check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug assembleDebug",
+    "build:packages": "tsc -b --clean packages/bare-host-protocol packages/kepos-android-worklet && tsc -b packages/bare-host-protocol packages/kepos-android-worklet",
+    "check": "npm run build:packages && npm run typecheck && npm run test:coverage && npm run check:home",
     "check:home": "npm run build:home && git diff --exit-code -- home/styles.css",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info",
+    "test": "npm run build:packages && node --import tsx --test",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-include=\"packages/*/src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info",
     "build:home": "tailwindcss -i home/styles.input.css -o home/styles.css --minify",
     "kepos": "tsx src/cli/main.ts"
   },
@@ -37,8 +45,13 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.2",
+    "@types/b4a": "^1.6.5",
     "@types/node": "^26.1.1",
+    "bare-link": "^3.3.0",
+    "bare-pack": "^2.2.1",
     "daisyui": "^5.6.16",
+    "extract-zip": "^2.0.1",
+    "https-proxy-agent": "^9.1.0",
     "lefthook": "^2.1.10",
     "tailwindcss": "^4.3.2",
     "tsx": "^4.23.0",
