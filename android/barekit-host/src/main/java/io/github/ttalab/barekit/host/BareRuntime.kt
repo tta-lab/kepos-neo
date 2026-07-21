@@ -6,6 +6,7 @@ import io.github.ttalab.barekit.host.protocol.IpcFrameCodec
 import io.github.ttalab.barekit.host.protocol.RequestTracker
 import io.github.ttalab.barekit.host.protocol.ResponseEnvelope
 import java.io.InputStream
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -109,6 +110,13 @@ class BareRuntime(
     if (current.state == RuntimeState.STOPPED) {
       return CompletableFuture.completedFuture(current)
     }
+    if (current.state == RuntimeState.FAILED) {
+      val runtimeId = checkNotNull(current.runtimeId)
+      cancelPings()
+      state.stopped(runtimeId)
+      notifyObservers()
+      return CompletableFuture.completedFuture(state.snapshot())
+    }
     check(current.state == RuntimeState.STARTING || current.state == RuntimeState.RUNNING) {
       "cannot stop a runtime from ${current.state}"
     }
@@ -185,6 +193,7 @@ class BareRuntime(
     stopTimeout?.close()
     stopTimeout = null
     closeSession()
+    cancelPings()
     state.stopped(runtimeId)
     val stopped = state.snapshot()
     notifyObservers()
@@ -204,8 +213,16 @@ class BareRuntime(
     stopFuture?.completeExceptionally(error)
     stopFuture = null
     stopRequestId = null
+    rejectPings(error)
+  }
+
+  private fun rejectPings(error: Throwable) {
     pingFutures.values.forEach { it.completeExceptionally(error) }
     pingFutures.clear()
+  }
+
+  private fun cancelPings() {
+    rejectPings(CancellationException("runtime stopped before ping completed"))
   }
 
   private fun closeSession() {

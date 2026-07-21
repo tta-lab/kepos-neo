@@ -60,7 +60,10 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
   @Synchronized
   fun stopped(runtimeId: String) {
     requireCurrent(runtimeId)
-    check(current.state == RuntimeState.STOPPING) {
+    check(
+      current.state == RuntimeState.STOPPING ||
+        current.state == RuntimeState.FAILED,
+    ) {
       "runtime cannot enter stopped from ${current.state}"
     }
     current = RuntimeSnapshot(RuntimeState.STOPPED)

@@ -7,11 +7,13 @@ import io.github.ttalab.barekit.host.protocol.RequestEnvelope
 import io.github.ttalab.barekit.host.protocol.ResponseEnvelope
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -129,9 +131,61 @@ class BareRuntimeTest {
     assertEquals("runtime-1", ping.get(1, TimeUnit.SECONDS).runtimeId)
   }
 
+  @Test
+  fun failedRuntimeCanBeStoppedIdempotently() {
+    val session = FakeRuntimeSession()
+    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
+    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
+    session.fail(IllegalStateException("worklet exited"))
+
+    val stopped = runtime.stop().get(1, TimeUnit.SECONDS)
+    val duplicate = runtime.stop().get(1, TimeUnit.SECONDS)
+
+    assertEquals(RuntimeSnapshot(RuntimeState.STOPPED), stopped)
+    assertEquals(stopped, duplicate)
+  }
+
+  @Test
+  fun cleanStopRejectsAnUnansweredPing() {
+    val session = FakeRuntimeSession()
+    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
+    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
+    session.emit(
+      EventEnvelope(
+        1,
+        "event",
+        "runtime.stateChanged",
+        buildJsonObject {
+          put("state", "running")
+          put("runtimeId", "runtime-1")
+          put("echoUrl", "http://127.0.0.1:17482/")
+        },
+      ),
+    )
+
+    val ping = runtime.ping()
+    val stopped = runtime.stop()
+    val stopRequest = session.writes.last() as RequestEnvelope
+    session.emit(
+      ResponseEnvelope(
+        1,
+        "response",
+        stopRequest.id,
+        buildJsonObject { put("stopped", true) },
+      ),
+    )
+
+    assertEquals(RuntimeState.STOPPED, stopped.get(1, TimeUnit.SECONDS).state)
+    assertTrue(ping.isCompletedExceptionally)
+    assertThrows(CancellationException::class.java) {
+      ping.get(1, TimeUnit.SECONDS)
+    }
+  }
+
   private class FakeRuntimeSession : RuntimeSession {
     private val codec = IpcFrameCodec()
     private lateinit var onData: (ByteArray) -> Unit
+    private lateinit var onFailure: (Throwable) -> Unit
     var starts = 0
     var closes = 0
     val writes = mutableListOf<HostEnvelope>()
@@ -145,6 +199,7 @@ class BareRuntimeTest {
     ) {
       starts++
       this.onData = onData
+      this.onFailure = onFailure
     }
 
     override fun write(data: ByteArray, onFailure: (Throwable) -> Unit) {
@@ -153,6 +208,10 @@ class BareRuntimeTest {
 
     fun emit(envelope: HostEnvelope) {
       onData(codec.encode(envelope))
+    }
+
+    fun fail(error: Throwable) {
+      onFailure(error)
     }
 
     override fun close() {

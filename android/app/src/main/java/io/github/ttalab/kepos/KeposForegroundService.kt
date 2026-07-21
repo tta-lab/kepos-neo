@@ -82,13 +82,6 @@ class KeposForegroundService : Service() {
 
   private fun stopRuntime() {
     restartController.stop()
-    if (
-      runtime.snapshot().state == RuntimeState.STOPPED ||
-      runtime.snapshot().state == RuntimeState.FAILED
-    ) {
-      finishServiceStop()
-      return
-    }
     runtime.stop().whenComplete { _, _ ->
       handler.post { finishServiceStop() }
     }
