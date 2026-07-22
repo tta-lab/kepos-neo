@@ -177,14 +177,15 @@ timeout itself; in a real HyperDHT stream, its own timeout can win the race.
 
 ### Real Mac network switch
 
-The same Mac subscriber was then left running while the Mac moved from a
-`192.168.31.0/24` Wi-Fi network to a `192.168.1.0/24` Wi-Fi network. The
-subscriber process, state directory, identity, and localhost listeners were
-not restarted or replaced. Its prior outer closed and a new outer reached the
-same publisher through a public IPv4 endpoint. The publisher journal showed
-the prior outer closed before it accepted the replacement for the same
-subscriber public key, so the publisher did not retain two active sessions
-for that identity.
+The same Mac subscriber was then left running while the Mac slept, woke, and
+moved from a `192.168.31.0/24` Wi-Fi network to a `192.168.1.0/24` Wi-Fi
+network. The subscriber process, state directory, identity, and localhost
+listeners were not restarted or replaced. macOS published the new IPv4 path
+at 22:01:43.556; the publisher accepted the new outer at 22:01:57.020. That is
+13.46 seconds from the network-change event, or 11.74 seconds from macOS
+reporting the DHCP lease fully bound. Its prior outer had already closed, and
+the new outer reached the same publisher through a public IPv4 endpoint. The
+publisher did not retain two active sessions for that subscriber identity.
 
 After recovery, the original local ports still served all three paths:
 
@@ -194,10 +195,10 @@ After recovery, the original local ports still served all three paths:
 | Navidrome `/ping` | HTTP 200 | 31 ms |
 | OpenSSH command | success | 468 ms |
 
-This proves recovery across a real Mac interface and address change without
-restarting the subscriber or its local services. It does not prove migration
-of TCP streams that were already open when the network changed; callers may
-need to retry those streams over the restored outer.
+This proves recovery across a real Mac sleep/wake, interface path, and address
+change without restarting the subscriber or its local services. It does not
+prove migration of TCP streams that were already open when the network
+changed; callers may need to retry those streams over the restored outer.
 
 ### Migration provenance
 
