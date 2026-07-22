@@ -230,6 +230,64 @@ test("service open yields before retrying a destroyed outer connection", async (
   await connection.stop();
 });
 
+test("heartbeat timeout reports one unhealthy outer before reconnecting", async () => {
+  const events: Observation[] = [];
+  const initial = new FakeDhtStream(true);
+  const restored = new FakeDhtStream(true);
+  const candidates = [initial, restored];
+  let timeoutHeartbeat: (() => void) | undefined;
+  const connection = createPublisherConnection({
+    connect: () => {
+      const stream = candidates.shift();
+      if (!stream) throw new Error("unexpected connection attempt");
+      return stream;
+    },
+    createMuxSubscriber: (outer, options) => {
+      if (outer === initial) {
+        timeoutHeartbeat = () => {
+          options?.onHeartbeatTimeout?.({
+            lastPongElapsedMs: 35_000,
+            missedPongs: 2,
+          });
+          outer.destroy(new Error("Publisher heartbeat timed out"));
+        };
+      }
+      return {
+        close: () => outer.destroy(),
+        open: async () => new PassThrough(),
+      };
+    },
+    now: () => 40_000,
+    observe: (event) => events.push(event),
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  await connection.start();
+  timeoutHeartbeat?.();
+  await waitFor(
+    () => events.some(({ event }) => event === "outer.restored"),
+    "heartbeat recovery did not restore",
+  );
+
+  const unhealthy = events.filter(
+    ({ event }) => event === "outer.unhealthy",
+  );
+  assert.equal(unhealthy.length, 1);
+  assert.equal(unhealthy[0]?.missedPongs, 2);
+  assert.equal(unhealthy[0]?.lastPongElapsedMs, 35_000);
+  assert.equal(
+    events.find(({ event }) => event === "outer.closed")?.outerId,
+    unhealthy[0]?.outerId,
+  );
+  assert.notEqual(
+    events.find(({ event }) => event === "outer.restored")?.outerId,
+    unhealthy[0]?.outerId,
+  );
+
+  await connection.stop();
+});
+
 test("aborting a service open rejects promptly and destroys a late tunnel", async () => {
   const outer = new FakeDhtStream(true);
   const lateTunnel = new PassThrough();

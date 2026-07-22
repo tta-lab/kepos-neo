@@ -1,6 +1,6 @@
 # Mac to kosmos transport evidence
 
-Dates: 2026-07-17 and 2026-07-18
+Dates: 2026-07-17, 2026-07-18, and 2026-07-22
 
 The first section records the current persistent Protomux runtime. Later
 sections retain the earlier one-process-per-service Hypertele evidence for
@@ -146,6 +146,59 @@ This is one acceptance sample, not a latency baseline. Route discovery and NAT
 conditions vary. The migration adds no transport gzip: Home/HTTP and
 Navidrome already have application-level compression choices, while SSH is
 encrypted and media payloads are generally incompressible.
+
+### Silent-path recovery and one subscriber identity
+
+On 2026-07-22, the updated publisher was deployed first to the existing
+kosmos-wsl transient user service. The Mac then started the updated subscriber
+with its existing identity and listeners. Its outer connection selected the
+LAN endpoint and completed in 1.79 seconds. Home, Navidrome `/ping`, and a real
+OpenSSH command all succeeded through that one outer connection.
+
+While that subscriber was running, a second CLI process tried to use the same
+state directory. It exited before connecting with `Subscriber identity is
+already in use`; the owner-only lock lived beside the strict state directory,
+not among its identity files.
+
+To model a path that silently stops carrying packets, kosmos-wsl dropped
+outbound UDP to the Mac for 45 seconds. The existing HyperDHT stream reported
+`connection timed out` about 35 seconds after packet loss began, just before or
+at the same threshold as the application heartbeat. The subscriber kept the
+same process and localhost listeners, discarded that outer, retried in the
+background, and reported `outer.restored` on a new outer 38.62 seconds after
+the close. The publisher closed the old outer before accepting the restored
+one.
+
+After the temporary firewall rule had been removed, Home, Navidrome, and SSH
+all succeeded again through the original local ports. The firewall rule was
+verified absent. This sample proves recovery from a silent UDP path and stable
+local listeners. The focused transport tests separately force the heartbeat
+timeout itself; in a real HyperDHT stream, its own timeout can win the race.
+
+### Real Mac network switch
+
+The same Mac subscriber was then left running while the Mac slept, woke, and
+moved from a `192.168.31.0/24` Wi-Fi network to a `192.168.1.0/24` Wi-Fi
+network. The subscriber process, state directory, identity, and localhost
+listeners were not restarted or replaced. macOS published the new IPv4 path
+at 22:01:43.556; the publisher accepted the new outer at 22:01:57.020. That is
+13.46 seconds from the network-change event, or 11.74 seconds from macOS
+reporting the DHCP lease fully bound. Its prior outer had already closed, and
+the new outer reached the same publisher through a public IPv4 endpoint. The
+publisher did not retain two active sessions for that subscriber identity.
+
+After recovery, the original local ports still served all three paths:
+
+| Operation | Result | Time |
+| --- | --- | ---: |
+| Home | HTTP 200 | 39 ms |
+| Navidrome `/ping` | HTTP 200 | 31 ms |
+| OpenSSH command | success | 468 ms |
+
+This proves recovery across a real Mac sleep/wake, interface path, and address
+change without restarting the subscriber or its local services. It does not
+prove migration of TCP streams that were already open when the network
+changed; callers may need to retry those streams over the restored outer.
 
 ### Migration provenance
 

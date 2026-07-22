@@ -17,6 +17,7 @@ interface Calls {
   setPublisherServices: unknown[];
   startPublisher: unknown[];
   startSubscriber: unknown[];
+  subscriberLocks: string[];
   stopped: string[];
 }
 
@@ -34,6 +35,7 @@ function fakeCli(): {
     setPublisherServices: [],
     startPublisher: [],
     startSubscriber: [],
+    subscriberLocks: [],
     stopped: [],
   };
   const stdout: string[] = [];
@@ -121,6 +123,14 @@ function fakeCli(): {
         }),
         stop: async () => {
           calls.stopped.push("subscriber");
+        },
+      };
+    },
+    acquireSubscriberRuntimeLock: async (stateDir) => {
+      calls.subscriberLocks.push(`acquire:${stateDir}`);
+      return {
+        release: async () => {
+          calls.subscriberLocks.push(`release:${stateDir}`);
         },
       };
     },
@@ -286,18 +296,45 @@ test("subscriber run maps services and writes NDJSON observations", async () => 
     gatewayPort: number;
     route: string;
     bootstrap: Array<{ host: string; port: number }>;
+    waitForPublisher: boolean;
   }>;
   assert.equal(options.stateDir, path.resolve("./subscriber"));
   assert.deepEqual(options.services, [{ id: "ssh", localPort: 2222 }]);
   assert.equal(options.gatewayPort, 18_080);
   assert.equal(options.route, "public");
+  assert.equal(options.waitForPublisher, false);
   assert.deepEqual(options.bootstrap, [
     { host: "34.143.181.65", port: 49738 },
   ]);
   assert.deepEqual(cli.calls.stopped, ["subscriber"]);
+  assert.deepEqual(cli.calls.subscriberLocks, [
+    `acquire:${path.resolve("./subscriber")}`,
+    `release:${path.resolve("./subscriber")}`,
+  ]);
   assert.equal(cli.stdout.length, 1);
   assert.equal(JSON.parse(cli.stdout[0] ?? "").event, "outer.connected");
   assert.match(cli.stderr.join("\n"), /Subscriber running/);
+});
+
+test("subscriber run releases its identity lock when startup fails", async () => {
+  const cli = fakeCli();
+  cli.dependencies.startSubscriber = async () => {
+    throw new Error("publisher unavailable");
+  };
+
+  await assert.rejects(
+    () =>
+      runCli(
+        ["subscriber", "run", "--state", "./subscriber"],
+        cli.dependencies,
+      ),
+    /publisher unavailable/,
+  );
+
+  assert.deepEqual(cli.calls.subscriberLocks, [
+    `acquire:${path.resolve("./subscriber")}`,
+    `release:${path.resolve("./subscriber")}`,
+  ]);
 });
 
 test("run commands reject malformed bootstrap endpoints", async () => {

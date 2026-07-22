@@ -22,6 +22,17 @@ import {
   setupSubscriber,
 } from "../src/state/subscriber.js";
 import type { Observation } from "../src/mux/observability.js";
+import {
+  createDht,
+  keyPairFromSecretKey,
+  type DhtNode,
+  type DhtStream,
+} from "../src/mux/hyperdht.js";
+import {
+  createMuxSubscriber,
+  type RunningMuxSubscriber,
+} from "../src/mux/transport.js";
+import { loadSubscriberState } from "../src/state/subscriber.js";
 
 interface HyperDhtTestnet {
   bootstrap: Array<{ host: string; port: number }>;
@@ -84,6 +95,18 @@ async function waitForHttpOk(url: string, timeoutMs = 8_000): Promise<Response> 
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`HTTP endpoint did not recover: ${String(lastError)}`);
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  message: string,
+  timeoutMs = 8_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(message);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 test("one persistent subscriber connection carries Home, Navidrome, and SSH", async () => {
@@ -377,6 +400,191 @@ test("one publisher accepts multiple subscribers with independent connections", 
     throw new AggregateError(
       [testError, ...cleanupErrors].filter((error) => error !== undefined),
       "multi-subscriber test or cleanup failed",
+    );
+  }
+});
+
+test("publisher replaces an older outer for the same subscriber key", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-replace-"));
+  const publisherState = path.join(root, "publisher");
+  const subscriberState = path.join(root, "subscriber");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriberA: RunningSubscriber | undefined;
+  let subscriberB: RunningSubscriber | undefined;
+  let testError: unknown;
+  const publisherEvents: Observation[] = [];
+
+  try {
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+      observe: (event) => {
+        publisherEvents.push(event);
+        if (event.event === "outer.replaced") {
+          void subscriberA?.stop();
+        }
+      },
+    });
+    subscriberA = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [],
+      log: noLog,
+    });
+    assert.equal((await fetch(subscriberA.home.url)).status, 200);
+
+    subscriberB = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [],
+      log: noLog,
+    });
+    await waitFor(
+      () => publisherEvents.some(({ event }) => event === "outer.replaced"),
+      "publisher did not replace the older subscriber outer",
+    );
+    await subscriberA.stop();
+    subscriberA = undefined;
+    await waitFor(
+      () => publisher?.activeSubscribers() === 1,
+      "publisher did not retain one current subscriber",
+    );
+
+    assert.equal((await fetch(subscriberB.home.url)).status, 200);
+    assert.equal(publisher.activeSubscribers(), 1);
+    assert.ok(publisher.acceptedConnections() >= 2);
+    assert.equal(
+      publisherEvents.filter(({ event }) => event === "outer.replaced")
+        .length,
+      1,
+    );
+  } catch (error) {
+    testError = error;
+  }
+
+  const cleanup = await Promise.allSettled([
+    subscriberA?.stop(),
+    subscriberB?.stop(),
+    publisher?.stop(),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "same-subscriber replacement test or cleanup failed",
+    );
+  }
+});
+
+test("publisher denies a non-current outer using the same subscriber key", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-candidate-"));
+  const publisherState = path.join(root, "publisher");
+  const subscriberState = path.join(root, "subscriber");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let candidateDht: DhtNode | undefined;
+  let candidateOuter: DhtStream | undefined;
+  let candidateMux: RunningMuxSubscriber | undefined;
+  let testError: unknown;
+
+  try {
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    subscriber = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [],
+      log: noLog,
+    });
+    assert.equal((await fetch(subscriber.home.url)).status, 200);
+
+    const state = await loadSubscriberState(subscriberState);
+    const keyPair = keyPairFromSecretKey(state.identity.secretKey);
+    candidateDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair,
+    });
+    candidateOuter = candidateDht.connect(
+      Buffer.from(publisherSetup.publisherKey, "hex"),
+      {
+        keyPair,
+        localConnection: true,
+        reusableSocket: true,
+      },
+    );
+    if (!candidateOuter.connected) await once(candidateOuter, "connect");
+    candidateMux = createMuxSubscriber(candidateOuter, {
+      heartbeat: false,
+    });
+
+    await assert.rejects(
+      () => candidateMux!.open("home"),
+      /subscriber connection is not current/i,
+    );
+    assert.equal((await fetch(subscriber.home.url)).status, 200);
+    assert.equal(publisher.activeSubscribers(), 1);
+  } catch (error) {
+    testError = error;
+  }
+
+  candidateMux?.close();
+  const cleanup = await Promise.allSettled([
+    subscriber?.stop(),
+    publisher?.stop(),
+    candidateDht?.destroy({ force: true }),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "same-subscriber candidate test or cleanup failed",
     );
   }
 });
