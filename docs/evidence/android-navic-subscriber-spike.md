@@ -76,19 +76,46 @@ after this replacement.
 
 ## Public-path and Navic acceptance
 
-The following items are not yet evidence-backed and must remain unchecked until
-run on the physical device without `adb reverse`, an HTTP proxy, TUN dependency,
-or a LAN-only shortcut:
+The public-path checks below ran without `adb reverse` or a configured Android
+HTTP proxy. The publisher observed the Android peer at public IPv4 address
+`124.160.204.171`, rather than through a LAN-only shortcut. No credential or
+subscriber secret was collected.
 
-- [ ] Android connects to the allowlisted kosmos-wsl publisher.
-- [ ] `http://home.localhost:17480/` loads in an Android browser.
-- [ ] Navic logs in and plays through `http://navidrome.localhost:17480/`, or
-      the `http://127.0.0.1:17481/` resolver fallback is recorded.
-- [ ] Playback continues for 30 minutes with the screen locked.
-- [ ] Wi-Fi to cellular to Wi-Fi recovers without changing the configured URL.
+- [x] Android connects to the allowlisted kosmos-wsl publisher. The publisher
+      accepted subscriber `80745ccfb5cb1ec8...` and kept one outer connection.
+- [x] `http://home.localhost:17480/` loads in Brave on Android and reports the
+      `kosmos` Home online.
+- [x] Navic logs in and plays through `http://navidrome.localhost:17480/`.
+      Navidrome recorded `player="Navic [Navic]"` while playing `自从有了你`,
+      and the Android outer connection transferred about 15 MB during the same
+      session. This proves the hostname route on the initial cellular path; it
+      does not prove that Navic preserves hostname resolution after a network
+      change.
+- [x] Playback continues with the screen locked. A focused seven-minute spike
+      run stayed in `PLAYING`, advanced across three queue items, kept the same
+      Kepos PID, and returned HTTP 200 from port 17480 throughout. A 30-minute
+      soak is deferred to Stage B2 rather than used as a Stage B1 merge gate.
+- [ ] Wi-Fi to cellular to Wi-Fi recovers end to end without changing the
+      configured URL. One cellular-to-Wi-Fi switch did prove that Kepos closed
+      the old outer connection and opened a new one about eight seconds later.
+      Navic playback did not resume because Android then returned
+      `UnknownHostException` for `navidrome.localhost`; that client resolver gap
+      is separate from Kepos transport recovery.
 - [ ] Restarting the kosmos-wsl publisher recovers without restarting the app.
-- [ ] Android process recreation restores the listener and subscriber identity.
-- [ ] Idle memory, CPU, and a 30-minute battery sample are recorded.
+- [x] Android process recreation restores the listener and subscriber identity.
+      Killing PID 28338 produced PID 3738 after three seconds. The foreground
+      service and port 17480 returned, `/healthz` recovered from 503 to 200,
+      and the publisher accepted the same subscriber key on a new outer
+      connection without reopening the Activity.
+- [ ] Idle memory, CPU, and a 30-minute unplugged battery sample are recorded.
+
+The first idle sample showed 81,219 KiB total PSS, 151,856 KiB total RSS, and
+0.0% instantaneous CPU. During the short locked-screen run, total PSS ranged
+from 48,105 to 87,036 KiB. The device was connected to AC at 80%, so a real
+battery-drain sample remains Stage B2 work. Its purpose is not to prove tunnel
+correctness. It is a release-risk check that the foreground service, DHT
+keepalive, and reconnect policy do not cause abnormal idle drain. It is not a
+Stage B1 merge gate.
 
 No private key, Navidrome credential, auth cookie, or raw state file belongs in
 this document.
