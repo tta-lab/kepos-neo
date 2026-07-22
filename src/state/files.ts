@@ -10,6 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { isWindows } from "which-runtime";
 
 export async function pathExists(filePath: string): Promise<boolean> {
   try {
@@ -24,7 +25,7 @@ export async function pathExists(filePath: string): Promise<boolean> {
 }
 
 function requireOwnerOnly(mode: number, subject: string): void {
-  if (process.platform !== "win32" && (mode & 0o777) !== 0o600) {
+  if (!isWindows && (mode & 0o777) !== 0o600) {
     throw new Error(`${subject} must have owner-only permissions`);
   }
 }
@@ -37,7 +38,7 @@ export async function validateStateDirectory(
   if (!directory.isDirectory() || directory.isSymbolicLink()) {
     throw new Error(`state path must be a regular directory: ${stateDir}`);
   }
-  if (process.platform !== "win32" && (directory.mode & 0o777) !== 0o700) {
+  if (!isWindows && (directory.mode & 0o777) !== 0o700) {
     throw new Error(`state directory must have owner-only permissions: ${stateDir}`);
   }
 

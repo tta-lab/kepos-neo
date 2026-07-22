@@ -97,3 +97,68 @@ test("Android Worklet controller closes echo before acknowledging stop", async (
     },
   ]);
 });
+
+test("Android Worklet controller configures one publisher without stopping", async () => {
+  const output: HostEnvelope[] = [];
+  const decoder = new FrameDecoder();
+  let configuredKey: string | undefined;
+  let stopped = false;
+  const controller = new WorkletController({
+    runtimeId: "runtime-1",
+    echoUrl: "http://127.0.0.1:17482/",
+    write(frame) {
+      output.push(...decoder.push(frame));
+    },
+    async stopEcho() {
+      stopped = true;
+    },
+    async configurePublisher(publisherKey: string) {
+      configuredKey = publisherKey;
+      return { connection: "connecting" };
+    },
+    status() {
+      return {
+        subscriberPublicKey: "cd".repeat(32),
+        connection: configuredKey ? "connecting" : "offline",
+        navidromeUrl: "http://navidrome.localhost:17480/",
+      };
+    },
+  });
+  controller.start();
+
+  await controller.receive(
+    encodeFrame({
+      version: 1,
+      kind: "request",
+      id: 4,
+      method: "configure",
+      params: { publisherKey: "ab".repeat(32) },
+    }),
+  );
+
+  assert.equal(configuredKey, "ab".repeat(32));
+  assert.equal(stopped, false);
+  assert.deepEqual(output.at(-1), {
+    version: 1,
+    kind: "response",
+    id: 4,
+    result: { connection: "connecting" },
+  });
+
+  await controller.receive(
+    encodeFrame({ version: 1, kind: "request", id: 5, method: "status" }),
+  );
+  assert.deepEqual(output.at(-1), {
+    version: 1,
+    kind: "response",
+    id: 5,
+    result: {
+      state: "running",
+      runtimeId: "runtime-1",
+      echoUrl: "http://127.0.0.1:17482/",
+      subscriberPublicKey: "cd".repeat(32),
+      connection: "connecting",
+      navidromeUrl: "http://navidrome.localhost:17480/",
+    },
+  });
+});

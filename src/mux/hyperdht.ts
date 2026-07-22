@@ -1,10 +1,10 @@
-import { createRequire } from "node:module";
+import b4a from "b4a";
+import HyperDhtModule from "hyperdht";
 import { Duplex } from "node:stream";
 
 import { sanitizeObservation } from "./observability.js";
 
-const require = createRequire(import.meta.url);
-const HyperDHT = require("hyperdht") as HyperDhtConstructor;
+const HyperDHT = HyperDhtModule as HyperDhtConstructor;
 
 export interface DhtAddress {
   host: string;
@@ -12,8 +12,8 @@ export interface DhtAddress {
 }
 
 export interface DhtKeyPair {
-  publicKey: Buffer;
-  secretKey: Buffer;
+  publicKey: Uint8Array;
+  secretKey: Uint8Array;
 }
 
 export interface DhtStream extends Duplex {
@@ -31,7 +31,7 @@ export interface DhtServer {
 
 export interface DhtNode {
   connect: (
-    publicKey: Buffer,
+    publicKey: Uint8Array,
     options: {
       keyPair: DhtKeyPair;
       localConnection: boolean;
@@ -40,7 +40,7 @@ export interface DhtNode {
   ) => DhtStream;
   createServer: (
     options: {
-      firewall: (remotePublicKey: Buffer) => boolean;
+      firewall: (remotePublicKey: Uint8Array) => boolean;
       reusableSocket: true;
     },
     onConnection: (stream: DhtStream) => void,
@@ -54,7 +54,7 @@ interface HyperDhtConstructor {
     connectionKeepAlive: number;
     keyPair?: DhtKeyPair;
   }): DhtNode;
-  keyPair: (seed?: Buffer) => DhtKeyPair;
+  keyPair: (seed?: Uint8Array) => DhtKeyPair;
 }
 
 export function createDht(options: {
@@ -68,11 +68,11 @@ export function createDht(options: {
 }
 
 export function keyPairFromSeed(seed: string): DhtKeyPair {
-  return HyperDHT.keyPair(Buffer.from(seed, "hex"));
+  return HyperDHT.keyPair(b4a.from(seed, "hex"));
 }
 
 export function keyPairFromSecretKey(secretKey: string): DhtKeyPair {
-  return HyperDHT.keyPair(Buffer.from(secretKey.slice(0, 64), "hex"));
+  return HyperDHT.keyPair(b4a.from(secretKey.slice(0, 64), "hex"));
 }
 
 export function dhtStreamSnapshot(stream: DhtStream): unknown {

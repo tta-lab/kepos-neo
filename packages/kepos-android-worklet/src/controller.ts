@@ -10,6 +10,8 @@ export interface WorkletControllerOptions {
   echoUrl: string;
   write(frame: Uint8Array): void;
   stopEcho(): Promise<void>;
+  configurePublisher?(publisherKey: string): Promise<unknown>;
+  status?(): Record<string, unknown>;
 }
 
 export class WorkletController {
@@ -43,10 +45,50 @@ export class WorkletController {
         state: this.state,
         runtimeId: this.options.runtimeId,
         echoUrl: this.options.echoUrl,
+        ...this.options.status?.(),
       });
       return;
     }
+    if (request.method === "configure") {
+      await this.configure(request);
+      return;
+    }
     await this.stop(request);
+  }
+
+  private async configure(request: RequestEnvelope): Promise<void> {
+    try {
+      const params = request.params;
+      if (
+        typeof params !== "object" ||
+        params === null ||
+        Array.isArray(params) ||
+        typeof (params as Record<string, unknown>).publisherKey !== "string"
+      ) {
+        throw new Error("publisherKey is required");
+      }
+      const publisherKey = (params as { publisherKey: string }).publisherKey;
+      if (!/^[0-9a-f]{64}$/.test(publisherKey)) {
+        throw new Error("publisherKey must be 32 bytes of lowercase hex");
+      }
+      if (!this.options.configurePublisher) {
+        throw new Error("publisher configuration is unavailable");
+      }
+      this.respond(
+        request,
+        await this.options.configurePublisher(publisherKey),
+      );
+    } catch (error) {
+      this.write({
+        version: 1,
+        kind: "error",
+        id: request.id,
+        error: {
+          code: "invalid_configuration",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 
   private async stop(request: RequestEnvelope): Promise<void> {
@@ -66,7 +108,9 @@ export class WorkletController {
       data: {
         state: this.state,
         runtimeId: this.options.runtimeId,
-        ...(this.state === "running" ? { echoUrl: this.options.echoUrl } : {}),
+        ...(this.state === "running"
+          ? { echoUrl: this.options.echoUrl, ...this.options.status?.() }
+          : {}),
       },
     });
   }

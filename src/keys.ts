@@ -1,5 +1,7 @@
-import { createRequire } from "node:module";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import b4a from "b4a";
+import crypto from "hypercore-crypto";
+import HyperDhtModule from "hyperdht";
+import sodium from "sodium-universal";
 
 export interface ClientIdentity {
   secretKey: string;
@@ -7,20 +9,19 @@ export interface ClientIdentity {
 }
 
 interface HyperDhtKeyPair {
-  publicKey: Buffer;
-  secretKey: Buffer;
+  publicKey: Uint8Array;
+  secretKey: Uint8Array;
 }
 
 interface HyperDhtModule {
-  keyPair(seed?: Buffer): HyperDhtKeyPair;
+  keyPair(seed?: Uint8Array): HyperDhtKeyPair;
 }
 
-const require = createRequire(import.meta.url);
-const HyperDHT = require("hyperdht") as HyperDhtModule;
+const HyperDHT = HyperDhtModule as HyperDhtModule;
 const publicKeyPattern = /^[0-9a-f]{64}$/;
 const secretKeyPattern = /^[0-9a-f]{128}$/;
 
-function deriveKeyPair(seed: Buffer): HyperDhtKeyPair {
+function deriveKeyPair(seed: Uint8Array): HyperDhtKeyPair {
   const pair = HyperDHT.keyPair(seed);
   if (pair.publicKey.length !== 32 || pair.secretKey.length !== 64) {
     throw new Error("HyperDHT returned an invalid keypair");
@@ -30,7 +31,7 @@ function deriveKeyPair(seed: Buffer): HyperDhtKeyPair {
 }
 
 export function generatePublisherSeed(): string {
-  return randomBytes(32).toString("hex");
+  return b4a.toString(crypto.randomBytes(32), "hex");
 }
 
 export function derivePublisherHomeKey(seed: string): string {
@@ -38,14 +39,14 @@ export function derivePublisherHomeKey(seed: string): string {
     throw new Error("publisher seed must be 32 bytes of lowercase hex");
   }
 
-  return deriveKeyPair(Buffer.from(seed, "hex")).publicKey.toString("hex");
+  return b4a.toString(deriveKeyPair(b4a.from(seed, "hex")).publicKey, "hex");
 }
 
 export function generateClientIdentity(): ClientIdentity {
-  const pair = deriveKeyPair(randomBytes(32));
+  const pair = deriveKeyPair(crypto.randomBytes(32));
   return {
-    secretKey: pair.secretKey.toString("hex"),
-    publicKey: pair.publicKey.toString("hex"),
+    secretKey: b4a.toString(pair.secretKey, "hex"),
+    publicKey: b4a.toString(pair.publicKey, "hex"),
   };
 }
 
@@ -62,12 +63,12 @@ export function parseClientIdentity(value: unknown): ClientIdentity {
     throw new Error("client identity secretKey must be 64 bytes of lowercase hex");
   }
 
-  const suppliedPublicKey = Buffer.from(record.publicKey, "hex");
-  const suppliedSecretKey = Buffer.from(record.secretKey, "hex");
+  const suppliedPublicKey = b4a.from(record.publicKey, "hex");
+  const suppliedSecretKey = b4a.from(record.secretKey, "hex");
   const derived = deriveKeyPair(suppliedSecretKey.subarray(0, 32));
   if (
-    !timingSafeEqual(suppliedPublicKey, derived.publicKey) ||
-    !timingSafeEqual(suppliedSecretKey, derived.secretKey)
+    !sodium.sodium_memcmp(suppliedPublicKey, derived.publicKey) ||
+    !sodium.sodium_memcmp(suppliedSecretKey, derived.secretKey)
   ) {
     throw new Error("client identity does not match its secretKey seed");
   }

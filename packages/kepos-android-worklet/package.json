@@ -5,6 +5,7 @@
   "description": "Kepos subscriber entry point for an Android Bare Worklet",
   "license": "Apache-2.0",
   "type": "module",
+  "main": "dist/main.js",
   "dependencies": {
     "@tta-lab/bare-host-protocol": "0.0.0",
     "b4a": "^1.8.1",

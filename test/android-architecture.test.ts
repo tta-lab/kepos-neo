@@ -46,7 +46,12 @@ test("Android host boundaries are explicit extraction seams", async () => {
   );
   assert.equal(
     rootPackage.scripts?.["android:bundle"],
-    "npm run build:packages && tsx scripts/build-android-worklet.ts",
+    "npm run build:packages && tsc -p tsconfig.bare.json && tsx scripts/build-android-worklet.ts",
+  );
+  assert.notEqual(
+    await readProjectFile("src/android/worklet/main.ts"),
+    null,
+    "missing real subscriber Worklet entry",
   );
   assert.notEqual(
     await readProjectFile("scripts/fetch-bare-kit.ts"),

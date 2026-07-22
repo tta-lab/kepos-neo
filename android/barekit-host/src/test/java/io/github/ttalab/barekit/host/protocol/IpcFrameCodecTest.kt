@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IpcFrameCodecTest {
@@ -83,6 +84,22 @@ class IpcFrameCodecTest {
     for (envelope in envelopes) {
       assertEquals(listOf(envelope), IpcFrameCodec().push(IpcFrameCodec().encode(envelope)))
     }
+  }
+
+  @Test
+  fun roundTripsPublisherConfigurationParams() {
+    val publisherKey = "ab".repeat(32)
+    val frame = rawFrame(
+      """{"version":1,"kind":"request","id":4,"method":"configure","params":{"publisherKey":"$publisherKey"}}"""
+        .encodeToByteArray(),
+    )
+    val codec = IpcFrameCodec()
+    val request = codec.push(frame).single()
+    val encoded = codec.encode(request)
+    val payload = encoded.copyOfRange(4, encoded.size).decodeToString()
+
+    assertTrue(payload.contains("\"method\":\"configure\""))
+    assertTrue(payload.contains("\"publisherKey\":\"$publisherKey\""))
   }
 
   @Test

@@ -20,6 +20,7 @@ data class RequestEnvelope(
   override val kind: String,
   val id: Long,
   val method: String,
+  val params: JsonElement? = null,
 ) : HostEnvelope
 
 @Serializable
@@ -99,7 +100,12 @@ private fun validateEnvelope(envelope: HostEnvelope) {
     is RequestEnvelope -> {
       require(envelope.kind == "request") { "invalid control request kind" }
       requireRequestId(envelope.id)
-      require(envelope.method == "ping" || envelope.method == "status" || envelope.method == "stop") {
+      require(
+        envelope.method == "ping" ||
+          envelope.method == "status" ||
+          envelope.method == "stop" ||
+          envelope.method == "configure"
+      ) {
         "unsupported control request method"
       }
     }

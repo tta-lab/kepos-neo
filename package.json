@@ -7,6 +7,24 @@
   ],
   "license": "Apache-2.0",
   "type": "module",
+  "imports": {
+    "node:fs/promises": {
+      "bare": "bare-fs/promises",
+      "default": "node:fs/promises"
+    },
+    "node:net": {
+      "bare": "bare-net",
+      "default": "node:net"
+    },
+    "node:path": {
+      "bare": "bare-path",
+      "default": "node:path"
+    },
+    "node:stream": {
+      "bare": "bare-stream",
+      "default": "node:stream"
+    }
+  },
   "packageManager": "npm@10.9.8",
   "engines": {
     "node": ">=22 <23",
@@ -26,7 +44,7 @@
   },
   "scripts": {
     "android:fetch-bare-kit": "tsx scripts/fetch-bare-kit.ts",
-    "android:bundle": "npm run build:packages && tsx scripts/build-android-worklet.ts",
+    "android:bundle": "npm run build:packages && tsc -p tsconfig.bare.json && tsx scripts/build-android-worklet.ts",
     "android:assemble": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug",
     "android:check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug assembleDebug",
     "android:device-check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDebugAndroidTest",
@@ -40,9 +58,18 @@
     "kepos": "tsx src/cli/main.ts"
   },
   "dependencies": {
+    "b4a": "^1.8.1",
+    "bare-fs": "^4.7.4",
+    "bare-net": "^2.3.2",
+    "bare-path": "^3.1.1",
+    "bare-stream": "^2.13.3",
     "compact-encoding": "^3.3.0",
+    "hypercore-crypto": "^3.7.0",
     "hyperdht": "^6.33.0",
-    "protomux": "^3.11.0"
+    "protomux": "^3.11.0",
+    "sodium-universal": "^5.0.1",
+    "streamx": "^2.28.0",
+    "which-runtime": "^1.4.0"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.2",
