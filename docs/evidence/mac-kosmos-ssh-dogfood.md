@@ -147,6 +147,34 @@ conditions vary. The migration adds no transport gzip: Home/HTTP and
 Navidrome already have application-level compression choices, while SSH is
 encrypted and media payloads are generally incompressible.
 
+### Silent-path recovery and one subscriber identity
+
+On 2026-07-22, the updated publisher was deployed first to the existing
+kosmos-wsl transient user service. The Mac then started the updated subscriber
+with its existing identity and listeners. Its outer connection selected the
+LAN endpoint and completed in 1.79 seconds. Home, Navidrome `/ping`, and a real
+OpenSSH command all succeeded through that one outer connection.
+
+While that subscriber was running, a second CLI process tried to use the same
+state directory. It exited before connecting with `Subscriber identity is
+already in use`; the owner-only lock lived beside the strict state directory,
+not among its identity files.
+
+To model a path that silently stops carrying packets, kosmos-wsl dropped
+outbound UDP to the Mac for 45 seconds. The existing HyperDHT stream reported
+`connection timed out` about 35 seconds after packet loss began, just before or
+at the same threshold as the application heartbeat. The subscriber kept the
+same process and localhost listeners, discarded that outer, retried in the
+background, and reported `outer.restored` on a new outer 38.62 seconds after
+the close. The publisher closed the old outer before accepting the restored
+one.
+
+After the temporary firewall rule had been removed, Home, Navidrome, and SSH
+all succeeded again through the original local ports. The firewall rule was
+verified absent. This sample proves recovery from a silent UDP path and stable
+local listeners. The focused transport tests separately force the heartbeat
+timeout itself; in a real HyperDHT stream, its own timeout can win the race.
+
 ### Migration provenance
 
 The route mapping, connection/retry timing, sanitized DHT snapshots,

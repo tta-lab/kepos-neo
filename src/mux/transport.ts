@@ -18,6 +18,10 @@ const Protomux = ProtomuxModule as ProtomuxConstructor;
 const compact = compactModule as CompactEncoding;
 
 const protocol = "kepos/tcp/1";
+const controlProtocol = "kepos/control/1";
+const defaultHeartbeatIntervalMs = 15_000;
+const defaultHeartbeatResponseTimeoutMs = 10_000;
+const defaultMissedPongsBeforeTimeout = 2;
 
 interface Encoding<T> {
   decode: (state: unknown) => T;
@@ -79,16 +83,40 @@ interface TunnelMessages {
   status: MuxMessage<string>;
 }
 
+interface ControlMessages {
+  ping: MuxMessage<string>;
+  pong: MuxMessage<string>;
+}
+
+type ScheduleHeartbeat = (
+  delayMs: number,
+  callback: () => void,
+) => () => void;
+
+export interface HeartbeatOptions {
+  intervalMs?: number;
+  missedPongsBeforeTimeout?: number;
+  responseTimeoutMs?: number;
+  schedule?: ScheduleHeartbeat;
+}
+
 export interface MuxPublisherOptions {
   connect: (serviceId: string) => Promise<Duplex>;
+  heartbeat?: false;
   now?: () => number;
+  onControlReady?: () => void;
   observe?: Observe;
   outerId?: string;
   transportSnapshot?: () => unknown;
 }
 
 export interface MuxSubscriberOptions {
+  heartbeat?: false | HeartbeatOptions;
   now?: () => number;
+  onHeartbeatTimeout?: (fields: {
+    lastPongElapsedMs: number;
+    missedPongs: number;
+  }) => void;
   observe?: Observe;
   outerId?: string;
   transportSnapshot?: () => unknown;
@@ -101,6 +129,162 @@ export interface RunningMuxPublisher {
 export interface RunningMuxSubscriber {
   close: () => void;
   open: (serviceId: string) => Promise<Duplex>;
+}
+
+interface RunningControlChannel {
+  close: () => void;
+}
+
+function scheduleHeartbeat(
+  delayMs: number,
+  callback: () => void,
+): () => void {
+  const timeout = setTimeout(callback, delayMs);
+  return () => clearTimeout(timeout);
+}
+
+function positiveInteger(value: number | undefined, fallback: number): number {
+  return Number.isInteger(value) && (value ?? 0) > 0 ? value! : fallback;
+}
+
+function createSubscriberControlChannel(
+  mux: MuxInstance,
+  outer: OuterStream,
+  options: MuxSubscriberOptions,
+  now: () => number,
+): RunningControlChannel | undefined {
+  if (options.heartbeat === false) return undefined;
+
+  const heartbeat = options.heartbeat ?? {};
+  const intervalMs = positiveInteger(
+    heartbeat.intervalMs,
+    defaultHeartbeatIntervalMs,
+  );
+  const responseTimeoutMs = positiveInteger(
+    heartbeat.responseTimeoutMs,
+    defaultHeartbeatResponseTimeoutMs,
+  );
+  const missedPongsBeforeTimeout = positiveInteger(
+    heartbeat.missedPongsBeforeTimeout,
+    defaultMissedPongsBeforeTimeout,
+  );
+  const schedule = heartbeat.schedule ?? scheduleHeartbeat;
+  let cancelTimer: (() => void) | undefined;
+  let closed = false;
+  let lastPongAt = now();
+  let missedPongs = 0;
+  let pendingSequence: string | undefined;
+  let sequence = 0;
+  let messages: ControlMessages;
+
+  const channel = mux.createChannel({
+    protocol: controlProtocol,
+    id: crypto.randomBytes(16),
+    handshake: compact.string,
+    onopen: () => arm(intervalMs, sendPing),
+    onclose: stop,
+  });
+  if (!channel) return undefined;
+
+  messages = {
+    ping: channel.addMessage({
+      encoding: compact.string,
+      onmessage: () => undefined,
+    }),
+    pong: channel.addMessage({
+      encoding: compact.string,
+      onmessage: receivePong,
+    }),
+  };
+  outer.once("close", stop);
+  channel.open("1");
+
+  return { close: stop };
+
+  function arm(delayMs: number, callback: () => void): void {
+    cancelTimer?.();
+    cancelTimer = schedule(delayMs, callback);
+  }
+
+  function sendPing(): void {
+    if (closed) return;
+    pendingSequence = String(++sequence);
+    messages.ping.send(pendingSequence);
+    arm(responseTimeoutMs, missPong);
+  }
+
+  function receivePong(receivedSequence: string): void {
+    if (closed || receivedSequence !== pendingSequence) return;
+    pendingSequence = undefined;
+    missedPongs = 0;
+    lastPongAt = now();
+    arm(intervalMs, sendPing);
+  }
+
+  function missPong(): void {
+    if (closed) return;
+    pendingSequence = undefined;
+    missedPongs++;
+    if (missedPongs < missedPongsBeforeTimeout) {
+      sendPing();
+      return;
+    }
+    options.onHeartbeatTimeout?.({
+      lastPongElapsedMs: Math.max(0, now() - lastPongAt),
+      missedPongs,
+    });
+    stop();
+    outer.destroy(
+      new Error(
+        `Publisher heartbeat timed out after ${missedPongs} missed replies`,
+      ),
+    );
+  }
+
+  function stop(): void {
+    if (closed) return;
+    closed = true;
+    pendingSequence = undefined;
+    cancelTimer?.();
+    cancelTimer = undefined;
+    channel?.close();
+  }
+}
+
+function pairPublisherControlChannel(
+  mux: MuxInstance,
+  options: MuxPublisherOptions,
+): Set<MuxChannel> {
+  const channels = new Set<MuxChannel>();
+  if (options.heartbeat === false) return channels;
+
+  mux.pair({ protocol: controlProtocol }, (id) => {
+    let messages: ControlMessages;
+    const channel = mux.createChannel({
+      protocol: controlProtocol,
+      id,
+      handshake: compact.string,
+      onopen: () => options.onControlReady?.(),
+      onclose: () => {
+        if (channel) channels.delete(channel);
+      },
+    });
+    if (!channel) return;
+    channels.add(channel);
+    messages = {
+      ping: channel.addMessage({
+        encoding: compact.string,
+        onmessage: (receivedSequence) =>
+          messages.pong.send(receivedSequence),
+      }),
+      pong: channel.addMessage({
+        encoding: compact.string,
+        onmessage: () => undefined,
+      }),
+    };
+    channel.open("1");
+  });
+  return channels;
 }
 
 class MuxTunnel extends Duplex {
@@ -364,6 +548,7 @@ export function createMuxSubscriber(
   const mux = new Protomux(outer);
   const now = options.now ?? Date.now;
   const outerId = options.outerId ?? createObservationId("outer");
+  const control = createSubscriberControlChannel(mux, outer, options, now);
 
   return {
     async open(serviceId: string): Promise<Duplex> {
@@ -403,6 +588,7 @@ export function createMuxSubscriber(
       return tunnel.stream;
     },
     close(): void {
+      control?.close();
       outer.destroy();
     },
   };
@@ -415,6 +601,7 @@ export function createMuxPublisher(
   const mux = new Protomux(outer);
   const now = options.now ?? Date.now;
   const outerId = options.outerId ?? createObservationId("outer");
+  const controlChannels = pairPublisherControlChannel(mux, options);
 
   mux.pair({ protocol }, (id) => {
     let serviceId: string | undefined;
@@ -467,6 +654,9 @@ export function createMuxPublisher(
   return {
     close(): void {
       mux.unpair({ protocol });
+      mux.unpair({ protocol: controlProtocol });
+      for (const channel of controlChannels) channel.close();
+      controlChannels.clear();
       outer.destroy();
     },
   };

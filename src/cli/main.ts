@@ -43,6 +43,10 @@ import {
   requiredOption,
   requiredState,
 } from "./options.js";
+import {
+  acquireSubscriberRuntimeLock,
+  type SubscriberRuntimeLock,
+} from "./runtime-lock.js";
 import { waitForSignal } from "./signals.js";
 
 interface CliPublisher {
@@ -84,6 +88,9 @@ export interface CliDependencies {
   startSubscriber: (
     options: StartSubscriberOptions,
   ) => Promise<CliSubscriber>;
+  acquireSubscriberRuntimeLock: (
+    stateDir: string,
+  ) => Promise<SubscriberRuntimeLock>;
   waitForSignal: (stop: () => Promise<void>) => Promise<void>;
 }
 
@@ -102,6 +109,7 @@ export function createDefaultCliDependencies(
     setPublisherServices,
     startPublisher,
     startSubscriber,
+    acquireSubscriberRuntimeLock,
     waitForSignal,
   };
 }
@@ -282,23 +290,30 @@ async function runSubscriberCommand(
   if (new Set(services.map(({ id }) => id)).size !== services.length) {
     throw new Error("subscriber services must have unique ids");
   }
-  const running = await dependencies.startSubscriber({
-    stateDir: requiredState(options),
-    bootstrap: parseBootstrapOptions(options),
-    gatewayPort: parseGatewayPortOption(options),
-    services,
-    route: parseRouteOption(options),
-    observe: observationWriter(mode, dependencies),
-  });
-  statusWriter(mode, dependencies)(
-    `Subscriber running: publisher=${running.publisherKey} home=${running.home.url}`,
-  );
-  for (const service of running.services) {
+  const stateDir = requiredState(options);
+  const lock = await dependencies.acquireSubscriberRuntimeLock(stateDir);
+  try {
+    const running = await dependencies.startSubscriber({
+      stateDir,
+      bootstrap: parseBootstrapOptions(options),
+      gatewayPort: parseGatewayPortOption(options),
+      services,
+      route: parseRouteOption(options),
+      observe: observationWriter(mode, dependencies),
+      waitForPublisher: false,
+    });
     statusWriter(mode, dependencies)(
-      `Local service: ${service.id}=127.0.0.1:${service.port}`,
+      `Subscriber running: publisher=${running.publisherKey} home=${running.home.url}`,
     );
+    for (const service of running.services) {
+      statusWriter(mode, dependencies)(
+        `Local service: ${service.id}=127.0.0.1:${service.port}`,
+      );
+    }
+    await dependencies.waitForSignal(running.stop);
+  } finally {
+    await lock.release();
   }
-  await dependencies.waitForSignal(running.stop);
 }
 
 function observationWriter(

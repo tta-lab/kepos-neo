@@ -12,6 +12,7 @@ import {
 import {
   createObservationEmitter,
   createObservationId,
+  type EmitObservation,
   type Observe,
 } from "../mux/observability.js";
 import {
@@ -72,6 +73,16 @@ export async function startPublisher(
   const now = options.now ?? Date.now;
   const streams = new Set<DhtStream>();
   const muxes = new Map<DhtStream, RunningMuxPublisher>();
+  const activeBySubscriberKey = new Map<
+    string,
+    {
+      mux: RunningMuxPublisher;
+      observe: EmitObservation;
+      outerId: string;
+      stream: DhtStream;
+    }
+  >();
+  const replacedStreams = new Set<DhtStream>();
   let accepted = 0;
   let stopped = false;
 
@@ -93,6 +104,7 @@ export async function startPublisher(
       reusableSocket: true,
     },
     (stream) => {
+      const subscriberKey = b4a.toString(stream.remotePublicKey, "hex");
       const outerId = createObservationId("outer");
       const observe = createObservationEmitter({
         observe: options.observe,
@@ -111,12 +123,34 @@ export async function startPublisher(
       observe("outer.connected", {
         transport: dhtStreamSnapshot(stream),
       });
-      const mux = createMuxPublisher(stream, {
+      let mux: RunningMuxPublisher | undefined;
+      mux = createMuxPublisher(stream, {
         outerId,
         now,
         observe: options.observe,
+        onControlReady: () => {
+          if (!mux || !streams.has(stream)) return;
+          const current = activeBySubscriberKey.get(subscriberKey);
+          if (current?.stream === stream) return;
+          activeBySubscriberKey.set(subscriberKey, {
+            mux,
+            observe,
+            outerId,
+            stream,
+          });
+          if (!current) return;
+          current.observe("outer.replaced", {
+            remotePublicKey: subscriberKey,
+            replacementOuterId: outerId,
+          });
+          replacedStreams.add(current.stream);
+          current.mux.close();
+        },
         transportSnapshot: () => dhtStreamSnapshot(stream),
         connect: async (serviceId) => {
+          if (activeBySubscriberKey.get(subscriberKey)?.stream !== stream) {
+            throw new Error("Subscriber connection is not current");
+          }
           const targetPort = targets.get(serviceId);
           if (targetPort === undefined) {
             throw new Error(`Service is not published: ${serviceId}`);
@@ -125,11 +159,27 @@ export async function startPublisher(
         },
       });
       muxes.set(stream, mux);
+      if (!activeBySubscriberKey.has(subscriberKey)) {
+        activeBySubscriberKey.set(subscriberKey, {
+          mux,
+          observe,
+          outerId,
+          stream,
+        });
+      }
       stream.once("close", () => {
         streams.delete(stream);
         muxes.delete(stream);
+        const current = activeBySubscriberKey.get(subscriberKey);
+        if (current?.stream === stream) {
+          activeBySubscriberKey.delete(subscriberKey);
+        }
         observe("outer.closed", {
-          trigger: stopped ? "local.stop" : "stream.close",
+          trigger: stopped
+            ? "local.stop"
+            : replacedStreams.delete(stream)
+              ? "subscriber.replaced"
+              : "stream.close",
         });
       });
     },
@@ -148,14 +198,14 @@ export async function startPublisher(
     publisherKey,
     home,
     acceptedConnections: () => accepted,
-    activeSubscribers: () => streams.size,
+    activeSubscribers: () => activeBySubscriberKey.size,
     status: () => ({
       role: "publisher",
       state: stopped ? "stopped" : "running",
       publisherKey,
       homeUrl: home.url,
       acceptedConnections: accepted,
-      activeSubscribers: streams.size,
+      activeSubscribers: activeBySubscriberKey.size,
     }),
     async stop(): Promise<void> {
       if (stopped) return;

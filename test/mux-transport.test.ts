@@ -9,6 +9,8 @@ import {
 } from "../src/mux/transport.js";
 
 class FramedDuplex extends Duplex {
+  destroyCalls = 0;
+  dropWrites = false;
   peer?: FramedDuplex;
 
   override _read(): void {}
@@ -19,8 +21,13 @@ class FramedDuplex extends Duplex {
     callback: (error?: Error | null) => void,
   ): void {
     const frame = Buffer.from(chunk);
-    setImmediate(() => this.peer?.push(frame));
+    if (!this.dropWrites) setImmediate(() => this.peer?.push(frame));
     callback();
+  }
+
+  override destroy(error?: Error): this {
+    this.destroyCalls++;
+    return super.destroy(error);
   }
 
   override _final(callback: (error?: Error | null) => void): void {
@@ -34,6 +41,40 @@ class FramedDuplex extends Duplex {
   ): void {
     setImmediate(() => this.peer?.push(null));
     callback(error);
+  }
+}
+
+class ManualScheduler {
+  now = 0;
+  private nextId = 0;
+  private readonly tasks = new Map<
+    number,
+    { at: number; callback: () => void }
+  >();
+
+  readonly schedule = (delayMs: number, callback: () => void): (() => void) => {
+    const id = ++this.nextId;
+    this.tasks.set(id, { at: this.now + delayMs, callback });
+    return () => this.tasks.delete(id);
+  };
+
+  advance(delayMs: number): void {
+    const target = this.now + delayMs;
+    while (true) {
+      const next = [...this.tasks.entries()]
+        .filter(([, task]) => task.at <= target)
+        .sort((left, right) => left[1].at - right[1].at)[0];
+      if (!next) break;
+      const [id, task] = next;
+      this.tasks.delete(id);
+      this.now = task.at;
+      task.callback();
+    }
+    this.now = target;
+  }
+
+  pending(): number {
+    return this.tasks.size;
   }
 }
 
@@ -76,6 +117,20 @@ function framedPair(): [FramedDuplex, FramedDuplex] {
   left.peer = right;
   right.peer = left;
   return [left, right];
+}
+
+async function flushFrames(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+function heartbeatOptions(scheduler: ManualScheduler) {
+  return {
+    intervalMs: 15,
+    missedPongsBeforeTimeout: 2,
+    responseTimeoutMs: 10,
+    schedule: scheduler.schedule,
+  };
 }
 
 function prefixService(prefix: string): Duplex {
@@ -164,6 +219,137 @@ test("multiplexes independent service streams over one persistent connection", a
   navidrome.destroy();
   subscriber.close();
   publisher.close();
+});
+
+test("keeps one outer alive while publisher answers control heartbeats", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("service:"),
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+  });
+
+  await flushFrames();
+  assert.equal(scheduler.pending(), 1);
+
+  scheduler.advance(15);
+  await flushFrames();
+  scheduler.advance(15);
+  await flushFrames();
+  scheduler.advance(10);
+
+  assert.equal(subscriberOuter.destroyed, false);
+  assert.equal(subscriberOuter.destroyCalls, 0);
+
+  subscriber.close();
+  publisher.close();
+});
+
+test("destroys a silent outer after two missed heartbeat replies", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  const errors: Error[] = [];
+  subscriberOuter.on("error", (error) => errors.push(error));
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("service:"),
+  });
+  createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+  });
+
+  await flushFrames();
+  subscriberOuter.dropWrites = true;
+  scheduler.advance(15);
+  scheduler.advance(10);
+  assert.equal(subscriberOuter.destroyed, false);
+  scheduler.advance(10);
+  await flushFrames();
+
+  assert.equal(subscriberOuter.destroyCalls, 1);
+  assert.match(errors[0]?.message ?? "", /heartbeat timed out/i);
+
+  publisher.close();
+});
+
+test("keeps the outer when a fresh heartbeat succeeds after one miss", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("service:"),
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+  });
+
+  await flushFrames();
+  subscriberOuter.dropWrites = true;
+  scheduler.advance(15);
+  subscriberOuter.dropWrites = false;
+  scheduler.advance(10);
+  await flushFrames();
+  scheduler.advance(10);
+
+  assert.equal(subscriberOuter.destroyed, false);
+  assert.equal(subscriberOuter.destroyCalls, 0);
+
+  subscriber.close();
+  publisher.close();
+});
+
+test("leaves heartbeat disabled for a publisher without control protocol support", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("legacy:"),
+    heartbeat: false,
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+  });
+
+  await flushFrames();
+  scheduler.advance(100);
+  assert.equal(scheduler.pending(), 0);
+  assert.equal(subscriberOuter.destroyed, false);
+
+  const stream = await subscriber.open("home");
+  assert.equal(await exchange(stream, "page"), "legacy:page");
+
+  stream.destroy();
+  subscriber.close();
+  publisher.close();
+});
+
+test("cancels heartbeat work when mux peers close", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("service:"),
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+  });
+
+  await flushFrames();
+  assert.equal(scheduler.pending(), 1);
+  subscriber.close();
+  publisher.close();
+  const subscriberDestroyCalls = subscriberOuter.destroyCalls;
+  const publisherDestroyCalls = publisherOuter.destroyCalls;
+
+  scheduler.advance(100);
+  await flushFrames();
+
+  assert.equal(scheduler.pending(), 0);
+  assert.equal(subscriberOuter.destroyCalls, subscriberDestroyCalls);
+  assert.equal(publisherOuter.destroyCalls, publisherDestroyCalls);
 });
 
 test("rejects an unpublished service without closing the persistent connection", async () => {

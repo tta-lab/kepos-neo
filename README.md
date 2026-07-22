@@ -15,8 +15,23 @@ independent Protomux channels for Home, SSH, Navidrome, and other services.
 Install dependencies with `npm ci`. Use the canonical `kepos` CLI below to
 create publisher and subscriber state.
 
-Generated keys and configs live under `tmp/`. They are secrets: do not commit,
-copy into logs, or share them.
+## Identity and keys
+
+Every publisher and subscriber has a cryptographic public/private key pair.
+The long hexadecimal key shown by the CLI or Android app is the **public key**,
+not a bearer token:
+
+- share a subscriber public key with its publisher so it can be allowlisted;
+- pin the publisher public key on each subscriber so it connects to the intended
+  publisher;
+- keep the subscriber secret key and publisher seed on the device that created
+  them. They prove ownership of the corresponding public key and must never be
+  copied to another device, committed, or placed in logs.
+
+CLI identities live inside the selected `--state` directory. Android stores its
+subscriber identity in app-private storage. Each installation must generate its
+own subscriber identity; copying a secret identity would make two installations
+impersonate the same subscriber. Public keys may be copied and displayed freely.
 
 ## Experimental Android subscriber
 
@@ -97,7 +112,7 @@ npm run kepos -- publisher run \
 npm run kepos -- subscriber set-publisher \
   --state ~/.local/state/kepos-neo/subscriber \
   --label kosmos \
-  --publisher-key <publisher-key>
+  --publisher-key <publisher-public-key>
 ```
 
 Both run commands accept repeated `--bootstrap host:port` options. Omitting
@@ -171,9 +186,29 @@ timeout, retransmit, recovery, and byte/packet counters. These are sanitized
 diagnostics whose shape may change; do not treat them as a stable API or copy
 state files into logs.
 
-The command prints the local Home URL. The gateway and raw TCP listeners remain
-stable while the subscriber reconnects in the background after a publisher
-restart. Active TCP stream recovery is deferred.
+The command prints the local Home URL immediately and keeps the gateway and raw
+TCP listeners bound while the publisher is unavailable. Connection attempts
+continue in the background instead of terminating the CLI.
+
+New peers also negotiate one `kepos/control/1` heartbeat channel on the existing
+encrypted outer connection. After a healthy pong, the subscriber waits 15
+seconds, allows 10 seconds for a reply, then retries once with another 10-second
+deadline. A silent path is therefore replaced after about 35 seconds even when
+HyperDHT has not emitted `close` or `error`. `outer.unhealthy`, `outer.closed`,
+and `outer.restored` observations describe that recovery without logging every
+normal ping.
+
+The publisher permits only one current outer connection for each authenticated
+subscriber public key. A new control-ready outer replaces the older one; a
+non-current candidate cannot open services. The CLI also locks each subscriber
+state directory while `subscriber run` owns its secret identity. Different
+subscriber installations must use different identities.
+
+Deploy the publisher before subscribers when introducing the control protocol.
+An older publisher remains compatible, but it does not provide the bounded
+heartbeat recovery or newest-connection replacement. Reconnecting preserves
+localhost ports and identity; active TCP streams still break and must be retried
+by the client.
 
 An empty allowlist revokes every subscriber without rotating the publisher
 key:
@@ -193,9 +228,8 @@ npm run kepos -- publisher set-services \
   --service navidrome:Navidrome:4533
 ```
 
-Publisher seeds and subscriber secret keys never cross devices. The historical
-evidence in `docs/evidence/mac-kosmos-ssh-dogfood.md` records the tested
-Mac-to-kosmos path and the commands used at the time.
+The historical evidence in `docs/evidence/mac-kosmos-ssh-dogfood.md` records
+the tested Mac-to-kosmos path and the commands used at the time.
 
 Home also exposes a bounded download endpoint for transport checks:
 

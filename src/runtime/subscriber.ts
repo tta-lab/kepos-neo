@@ -347,6 +347,12 @@ export function createPublisherConnection(options: {
             outerId,
             now: options.now,
             observe: options.observe,
+            onHeartbeatTimeout: (fields) => {
+              observe("outer.unhealthy", {
+                reason: "heartbeat.timeout",
+                ...fields,
+              });
+            },
             transportSnapshot: () => dhtStreamSnapshot(outer),
           }),
           observe,
