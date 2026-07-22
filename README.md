@@ -18,6 +18,34 @@ create publisher and subscriber state.
 Generated keys and configs live under `tmp/`. They are secrets: do not commit,
 copy into logs, or share them.
 
+## Experimental Android subscriber
+
+The Android app is a subscriber-only arm64 spike. A Kotlin foreground service
+owns one Bare Worklet, and that Worklet runs the same HyperDHT/Protomux
+subscriber core as the CLI. It does not install a VPN, TUN interface, or system
+DNS service.
+
+Build the debug APK and run its physical-device lifecycle gate:
+
+```sh
+npm run android:assemble
+npm run android:device-check
+```
+
+The app generates its subscriber identity in app-private storage. Add the
+displayed public key to the publisher allowlist, paste the publisher public key
+into the app, and keep the foreground service running. Navidrome is then
+available to Android clients at:
+
+```text
+http://navidrome.localhost:17480/
+http://127.0.0.1:17481/
+```
+
+The second URL is a direct loopback fallback for clients that do not resolve
+`*.localhost`. Both use the same publisher connection. This is not yet a Play
+Store release, and foreground-service policy remains unresolved.
+
 ## Persistent multiplex CLI
 
 The canonical CLI keeps one encrypted subscriber connection open to one

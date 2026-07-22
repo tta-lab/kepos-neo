@@ -37,4 +37,4 @@ The Activity can be recreated or closed without reconnecting the runtime. Headle
 
 This does not claim that Kepos has built a general cross-platform framework. We will extract a framework only after the same host boundary serves a second real product or platform.
 
-The debug APK currently includes Bare Kit and linked addons for all four Android ABIs, so it is large. ABI-split release packaging is deferred until distribution work begins.
+The spike APK includes only `arm64-v8a`, the ABI used by the physical-device gate. This keeps the debug APK from bundling four copies of Bare Kit and its addons. Emulator/x86 artifacts and store-grade ABI splits remain distribution work.
