@@ -94,7 +94,11 @@ class KeposForegroundService : Service() {
       val stateDir = filesDir.resolve("subscriber")
       runtime.start(
         assets.open(WORKLET_ASSET),
-        arguments = arrayOf(stateDir.absolutePath),
+        arguments = arrayOf(
+          stateDir.absolutePath,
+          BuildConfig.GATEWAY_PORT.toString(),
+          BuildConfig.NAVIDROME_PORT.toString(),
+        ),
       )
     } catch (error: Throwable) {
       Log.e(LOG_TAG, "Bare Worklet failed to start", error)

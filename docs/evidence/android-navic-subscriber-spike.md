@@ -30,6 +30,11 @@ The following gate passed on the Pixel 7a:
 npm run android:device-check
 ```
 
+The command targets the isolated `io.github.ttalab.kepos.devicetest` package
+and ports 18480/18481. It does not install over the dogfood app or reuse its
+subscriber state. Use `npm run android:install` to update the dogfood debug app
+with `adb install -r` while preserving its app-private identity.
+
 The instrumentation test proved that the real subscriber Worklet:
 
 - creates and preserves one subscriber identity;
