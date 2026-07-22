@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -16,6 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -49,8 +51,17 @@ fun KeposScreen(
         }
         OutlinedTextField(
           value = publisherKey,
-          onValueChange = { publisherKey = it.trim() },
+          onValueChange = { value ->
+            publisherKey = value
+              .lowercase()
+              .filter { character -> character.isDigit() || character in 'a'..'f' }
+              .take(PUBLISHER_KEY_LENGTH)
+          },
           label = { Text(text = "Publisher public key") },
+          keyboardOptions = KeyboardOptions(
+            autoCorrectEnabled = false,
+            keyboardType = KeyboardType.Ascii,
+          ),
           singleLine = true,
         )
         Button(
@@ -79,4 +90,5 @@ fun KeposScreen(
   }
 }
 
-private val PUBLISHER_KEY = Regex("^[0-9a-f]{64}$")
+private const val PUBLISHER_KEY_LENGTH = 64
+private val PUBLISHER_KEY = Regex("^[0-9a-f]{$PUBLISHER_KEY_LENGTH}$")
