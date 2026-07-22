@@ -182,6 +182,85 @@ class BareRuntimeTest {
     }
   }
 
+  @Test
+  fun sessionConstructorFailureEntersFailedAndAllowsRetry() {
+    val session = FakeRuntimeSession()
+    var creations = 0
+    var runtimeIds = 0
+    val runtime = BareRuntime(
+      createSession = {
+        creations++
+        if (creations == 1) throw IllegalStateException("native constructor failed")
+        session
+      },
+      createRuntimeId = { "runtime-${++runtimeIds}" },
+      scheduler = FakeScheduler(),
+    )
+    val observed = mutableListOf<RuntimeState>()
+    runtime.observe { observed += it.state }
+    val failedSource = TrackingInputStream()
+
+    assertThrows(IllegalStateException::class.java) {
+      runtime.start(failedSource)
+    }
+
+    assertEquals(
+      RuntimeSnapshot(
+        RuntimeState.FAILED,
+        runtimeId = "runtime-1",
+        error = "native constructor failed",
+      ),
+      runtime.snapshot(),
+    )
+    assertTrue(failedSource.closed)
+    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
+    assertEquals(RuntimeState.STARTING, runtime.snapshot().state)
+    assertEquals("runtime-2", runtime.snapshot().runtimeId)
+    assertEquals(1, session.starts)
+    assertEquals(
+      listOf(
+        RuntimeState.STOPPED,
+        RuntimeState.STARTING,
+        RuntimeState.FAILED,
+        RuntimeState.STARTING,
+      ),
+      observed,
+    )
+  }
+
+  @Test
+  fun synchronousSessionFailureEmitsFailedOnlyOnce() {
+    val error = IllegalStateException("native start failed")
+    val session = object : RuntimeSession {
+      override fun start(
+        filename: String,
+        source: InputStream,
+        arguments: Array<String>,
+        onData: (ByteArray) -> Unit,
+        onFailure: (Throwable) -> Unit,
+      ) {
+        onFailure(error)
+        throw error
+      }
+
+      override fun write(data: ByteArray, onFailure: (Throwable) -> Unit) = Unit
+
+      override fun close() = Unit
+    }
+    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
+    val observed = mutableListOf<RuntimeState>()
+    runtime.observe { observed += it.state }
+
+    assertThrows(IllegalStateException::class.java) {
+      runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
+    }
+
+    assertEquals(
+      listOf(RuntimeState.STOPPED, RuntimeState.STARTING, RuntimeState.FAILED),
+      observed,
+    )
+  }
+
   private class FakeRuntimeSession : RuntimeSession {
     private val codec = IpcFrameCodec()
     private lateinit var onData: (ByteArray) -> Unit
@@ -233,6 +312,15 @@ class BareRuntimeTest {
 
     fun run() {
       task?.invoke()
+    }
+  }
+
+  private class TrackingInputStream : ByteArrayInputStream("bundle".encodeToByteArray()) {
+    var closed = false
+
+    override fun close() {
+      closed = true
+      super.close()
     }
   }
 }

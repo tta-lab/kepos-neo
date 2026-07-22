@@ -69,9 +69,9 @@ class BareRuntime(
     codec = IpcFrameCodec()
     requests = RequestTracker()
     notifyObservers()
-    val created = createSession()
-    session = created
     try {
+      val created = createSession()
+      session = created
       created.start(
         filename,
         source,
@@ -80,7 +80,14 @@ class BareRuntime(
         { error -> fail(decision.runtimeId, error) },
       )
     } catch (error: Throwable) {
-      fail(decision.runtimeId, error)
+      if (state.snapshot().state != RuntimeState.FAILED) {
+        fail(decision.runtimeId, error)
+      }
+      try {
+        source.close()
+      } catch (closeError: Throwable) {
+        error.addSuppressed(closeError)
+      }
       throw error
     }
     return state.snapshot()
