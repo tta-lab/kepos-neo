@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { link, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -76,6 +76,33 @@ test("grants exactly one concurrent stale-lock claimant", async () => {
     await acquired[0].value.release();
   } finally {
     await rm(subscriberRuntimeLockPath(stateDir), { force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("recovers after a stale-lock claimant crashes", async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), "kepos-cli-claim-crash-"));
+  const lockPath = subscriberRuntimeLockPath(stateDir);
+  const orphanedClaim = `${lockPath}.reclaim.2147483647.${"a".repeat(32)}`;
+  await writeFile(
+    lockPath,
+    `${JSON.stringify({ ownerToken: "stale", pid: 2_147_483_647 })}\n`,
+    { mode: 0o600 },
+  );
+  await link(lockPath, orphanedClaim);
+
+  try {
+    const lock = await acquireSubscriberRuntimeLock(stateDir);
+    await lock.release();
+    assert.equal(
+      (await readdir(path.dirname(lockPath))).includes(
+        path.basename(orphanedClaim),
+      ),
+      false,
+    );
+  } finally {
+    await rm(orphanedClaim, { force: true });
+    await rm(lockPath, { force: true });
     await rm(stateDir, { recursive: true, force: true });
   }
 });
