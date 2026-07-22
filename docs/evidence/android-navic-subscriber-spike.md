@@ -83,9 +83,9 @@ after this replacement.
 ## Public-path and Navic acceptance
 
 The public-path checks below ran without `adb reverse` or a configured Android
-HTTP proxy. The publisher observed the Android peer at public IPv4 address
-`124.160.204.171`, rather than through a LAN-only shortcut. No credential or
-subscriber secret was collected.
+HTTP proxy. The publisher observed the Android peer at a public IPv4 endpoint,
+rather than through a LAN-only shortcut. No credential or subscriber secret
+was collected.
 
 - [x] Android connects to the allowlisted kosmos-wsl publisher. The publisher
       accepted subscriber `80745ccfb5cb1ec8...` and kept one outer connection.

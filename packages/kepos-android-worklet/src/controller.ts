@@ -17,6 +17,7 @@ export interface WorkletControllerOptions {
 export class WorkletController {
   private readonly decoder = new FrameDecoder();
   private state: WorkletState = "starting";
+  private receiveTask: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: WorkletControllerOptions) {}
 
@@ -31,7 +32,13 @@ export class WorkletController {
     this.emitState();
   }
 
-  async receive(chunk: Uint8Array): Promise<void> {
+  receive(chunk: Uint8Array): Promise<void> {
+    const task = this.receiveTask.then(() => this.receiveChunk(chunk));
+    this.receiveTask = task.catch(() => undefined);
+    return task;
+  }
+
+  private async receiveChunk(chunk: Uint8Array): Promise<void> {
     for (const envelope of this.decoder.push(chunk)) {
       if (envelope.kind !== "request") {
         throw new Error("Worklet accepts only control requests");

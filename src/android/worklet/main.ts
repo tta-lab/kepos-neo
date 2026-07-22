@@ -12,6 +12,7 @@ if (!stateDir) throw new Error("Android subscriber state directory is required")
 
 const gatewayPort = 17_480;
 const navidromePort = 17_481;
+const homeUrl = `http://home.localhost:${gatewayPort}/`;
 const navidromeUrl = `http://navidrome.localhost:${gatewayPort}/`;
 const setup = await setupSubscriber({ stateDir });
 let configured = setup.configured;
@@ -23,6 +24,7 @@ const status = (): Record<string, unknown> => ({
   subscriberPublicKey: setup.publicKey,
   configured,
   connection: running?.status().connection ?? connection,
+  homeUrl,
   navidromeUrl,
   navidromeFallbackUrl: `http://127.0.0.1:${navidromePort}/`,
 });
@@ -56,6 +58,7 @@ const controller = new WorkletController({
     BareKit.IPC.write(frame);
   },
   async configurePublisher(publisherKey) {
+    await connectTask;
     await running?.stop();
     running = undefined;
     await setSubscriberPublisher({
@@ -69,6 +72,7 @@ const controller = new WorkletController({
   },
   async stopEcho() {
     clearInterval(statusTimer);
+    await connectTask;
     await running?.stop();
     running = undefined;
     connection = "offline";

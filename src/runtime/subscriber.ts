@@ -166,8 +166,8 @@ export async function startSubscriber(
       async stop(): Promise<void> {
         if (stopped) return;
         stopped = true;
-        await Promise.allSettled(servers.map(closeServer));
         await connection.stop();
+        await Promise.allSettled(servers.map(closeServer));
         await dht.destroy({ force: true });
       },
     };

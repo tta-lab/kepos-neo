@@ -120,6 +120,7 @@ test("Android Worklet controller configures one publisher without stopping", asy
       return {
         subscriberPublicKey: "cd".repeat(32),
         connection: configuredKey ? "connecting" : "offline",
+        homeUrl: "http://home.localhost:17480/",
         navidromeUrl: "http://navidrome.localhost:17480/",
       };
     },
@@ -148,6 +149,7 @@ test("Android Worklet controller configures one publisher without stopping", asy
       echoUrl: "http://127.0.0.1:17482/",
       subscriberPublicKey: "cd".repeat(32),
       connection: "connecting",
+      homeUrl: "http://home.localhost:17480/",
       navidromeUrl: "http://navidrome.localhost:17480/",
     },
   });
@@ -171,6 +173,7 @@ test("Android Worklet controller configures one publisher without stopping", asy
       echoUrl: "http://127.0.0.1:17482/",
       subscriberPublicKey: "cd".repeat(32),
       connection: "connecting",
+      homeUrl: "http://home.localhost:17480/",
       navidromeUrl: "http://navidrome.localhost:17480/",
     },
   });
@@ -181,4 +184,56 @@ test("Android Worklet controller configures one publisher without stopping", asy
     (output.at(-1) as { data?: { connection?: string } }).data?.connection,
     "offline",
   );
+});
+
+test("Android Worklet controller serializes concurrent publisher configuration", async () => {
+  const decoder = new FrameDecoder();
+  const configured: string[] = [];
+  let releaseFirst: (() => void) | undefined;
+  const firstBlocked = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const controller = new WorkletController({
+    runtimeId: "runtime-1",
+    echoUrl: "http://127.0.0.1:17482/",
+    write(frame) {
+      decoder.push(frame);
+    },
+    async stopEcho() {},
+    async configurePublisher(publisherKey) {
+      configured.push(publisherKey);
+      if (configured.length === 1) await firstBlocked;
+      return { connection: "connecting" };
+    },
+  });
+  controller.start();
+
+  const first = controller.receive(
+    encodeFrame({
+      version: 1,
+      kind: "request",
+      id: 6,
+      method: "configure",
+      params: { publisherKey: "ab".repeat(32) },
+    }),
+  );
+  await Promise.resolve();
+  const second = controller.receive(
+    encodeFrame({
+      version: 1,
+      kind: "request",
+      id: 7,
+      method: "configure",
+      params: { publisherKey: "cd".repeat(32) },
+    }),
+  );
+  await Promise.resolve();
+
+  try {
+    assert.deepEqual(configured, ["ab".repeat(32)]);
+  } finally {
+    releaseFirst?.();
+    await Promise.all([first, second]);
+  }
+  assert.deepEqual(configured, ["ab".repeat(32), "cd".repeat(32)]);
 });

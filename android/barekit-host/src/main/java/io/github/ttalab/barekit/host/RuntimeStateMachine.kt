@@ -16,6 +16,7 @@ data class RuntimeSnapshot(
   val subscriberPublicKey: String? = null,
   val configured: Boolean = false,
   val connection: String? = null,
+  val homeUrl: String? = null,
   val navidromeUrl: String? = null,
   val navidromeFallbackUrl: String? = null,
 )
@@ -51,6 +52,7 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
     subscriberPublicKey: String? = null,
     configured: Boolean = false,
     connection: String? = null,
+    homeUrl: String? = null,
     navidromeUrl: String? = null,
     navidromeFallbackUrl: String? = null,
   ) {
@@ -65,6 +67,7 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
       subscriberPublicKey = subscriberPublicKey,
       configured = configured,
       connection = connection,
+      homeUrl = homeUrl,
       navidromeUrl = navidromeUrl,
       navidromeFallbackUrl = navidromeFallbackUrl,
     )

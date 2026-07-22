@@ -71,6 +71,12 @@ fun KeposScreen(
         ) {
           Text(text = "Connect")
         }
+        snapshot.homeUrl?.let { url ->
+          Text(text = url)
+          Button(onClick = { clipboard.setText(AnnotatedString(url)) }) {
+            Text(text = "Copy Home URL")
+          }
+        }
         snapshot.navidromeUrl?.let { url ->
           Text(text = url)
           Button(onClick = { clipboard.setText(AnnotatedString(url)) }) {

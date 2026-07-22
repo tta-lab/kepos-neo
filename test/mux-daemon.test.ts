@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { createConnection, createServer, type Server } from "node:net";
@@ -221,6 +222,73 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
       [testError, ...cleanupErrors].filter((error) => error !== undefined),
       "mux daemon test or cleanup failed",
     );
+  }
+});
+
+test("subscriber stop closes an active service tunnel before its listener", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-stop-"));
+  const subscriberState = path.join(root, "subscriber");
+  const publisherState = path.join(root, "publisher");
+  let acceptTarget: (() => void) | undefined;
+  const targetAccepted = new Promise<void>((resolve) => {
+    acceptTarget = resolve;
+  });
+  const target = createServer(() => acceptTarget?.());
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let client: ReturnType<typeof createConnection> | undefined;
+  let stopping: Promise<void> | undefined;
+
+  try {
+    const targetPort = await listen(target);
+    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [{ id: "ssh", name: "SSH", targetPort }],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    subscriber = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [{ id: "ssh", localPort: 0 }],
+      log: noLog,
+    });
+    const ssh = subscriber.services.find((service) => service.id === "ssh");
+    assert.ok(ssh);
+    client = createConnection({ host: "127.0.0.1", port: ssh.port });
+    await Promise.all([once(client, "connect"), targetAccepted]);
+
+    stopping = subscriber.stop();
+    await Promise.race([
+      stopping,
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("subscriber stop timed out")), 1_000);
+      }),
+    ]);
+  } finally {
+    client?.destroy();
+    await stopping?.catch(() => undefined);
+    await Promise.allSettled([
+      subscriber?.stop(),
+      publisher?.stop(),
+      closeServer(target),
+      testnet?.destroy(),
+      rm(root, { recursive: true, force: true }),
+    ]);
   }
 });
 

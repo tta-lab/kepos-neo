@@ -99,3 +99,22 @@ test("Android host boundaries are explicit extraction seams", async () => {
     "Bare Kit IPC must be created after the Worklet starts",
   );
 });
+
+test("Android subscriber waits for startup and exposes both local HTTP URLs", async () => {
+  const worklet = await readProjectFile("src/android/worklet/main.ts");
+  const runtimeState = await readProjectFile(
+    "android/barekit-host/src/main/java/io/github/ttalab/barekit/host/RuntimeStateMachine.kt",
+  );
+  const screen = await readProjectFile(
+    "android/app/src/main/java/io/github/ttalab/kepos/ui/KeposScreen.kt",
+  );
+  const evidence = await readProjectFile(
+    "docs/evidence/android-navic-subscriber-spike.md",
+  );
+
+  assert.match(worklet!, /await connectTask/);
+  assert.match(worklet!, /homeUrl/);
+  assert.match(runtimeState!, /val homeUrl: String\?/);
+  assert.match(screen!, /Copy Home URL/);
+  assert.doesNotMatch(evidence!, /124\.160\.204\.171/);
+});

@@ -47,6 +47,7 @@ class WorkletLifecycleTest {
     assertEquals(first.runtimeId, binder.ping().get(10, TimeUnit.SECONDS).runtimeId)
     assertNotNull(first.subscriberPublicKey)
     assertTrue(checkNotNull(first.subscriberPublicKey).matches(Regex("^[0-9a-f]{64}$")))
+    assertEquals("http://home.localhost:17480/", first.homeUrl)
     assertEquals("http://navidrome.localhost:17480/", first.navidromeUrl)
     assertEquals("http://127.0.0.1:17481/", first.navidromeFallbackUrl)
     val configured = binder.configurePublisher("ab".repeat(32)).get(10, TimeUnit.SECONDS)
@@ -59,6 +60,7 @@ class WorkletLifecycleTest {
       val afterRecreate = binder.awaitState(RuntimeState.RUNNING)
       assertEquals(first.runtimeId, afterRecreate.runtimeId)
       assertEquals(first.subscriberPublicKey, afterRecreate.subscriberPublicKey)
+      assertEquals(first.homeUrl, afterRecreate.homeUrl)
       assertEquals(first.navidromeUrl, afterRecreate.navidromeUrl)
     }
 

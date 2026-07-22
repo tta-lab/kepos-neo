@@ -70,6 +70,7 @@ class BareRuntimeTest {
           put("subscriberPublicKey", "cd".repeat(32))
           put("configured", true)
           put("connection", "connecting")
+          put("homeUrl", "http://home.localhost:17480/")
           put("navidromeUrl", "http://navidrome.localhost:17480/")
           put("navidromeFallbackUrl", "http://127.0.0.1:17481/")
         },
@@ -86,6 +87,7 @@ class BareRuntimeTest {
         subscriberPublicKey = "cd".repeat(32),
         configured = true,
         connection = "connecting",
+        homeUrl = "http://home.localhost:17480/",
         navidromeUrl = "http://navidrome.localhost:17480/",
         navidromeFallbackUrl = "http://127.0.0.1:17481/",
       ),
@@ -380,6 +382,7 @@ class BareRuntimeTest {
       put("subscriberPublicKey", "cd".repeat(32))
       put("configured", configured)
       put("connection", connection)
+      put("homeUrl", "http://home.localhost:17480/")
       put("navidromeUrl", "http://navidrome.localhost:17480/")
       put("navidromeFallbackUrl", "http://127.0.0.1:17481/")
     },

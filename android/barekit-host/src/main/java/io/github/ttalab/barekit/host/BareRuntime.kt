@@ -212,6 +212,7 @@ class BareRuntime(
       subscriberPublicKey = data["subscriberPublicKey"]?.jsonPrimitive?.content,
       configured = data["configured"]?.jsonPrimitive?.booleanOrNull ?: false,
       connection = data["connection"]?.jsonPrimitive?.content,
+      homeUrl = data["homeUrl"]?.jsonPrimitive?.content,
       navidromeUrl = data["navidromeUrl"]?.jsonPrimitive?.content,
       navidromeFallbackUrl = data["navidromeFallbackUrl"]?.jsonPrimitive?.content,
     )
