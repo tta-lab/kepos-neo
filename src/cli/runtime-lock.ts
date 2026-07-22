@@ -10,6 +10,8 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+// Node CLI process lock. The Android Bare Worklet has a host-owned lifecycle
+// and does not import this module.
 interface RuntimeLockState {
   ownerToken: string;
   pid: number;
@@ -79,6 +81,10 @@ async function replaceStaleLock(
   existing: RuntimeLockState,
   replacement: RuntimeLockState,
 ): Promise<boolean> {
+  // The hard link captures the stale inode without first removing the
+  // canonical lock. Only a claimant that owns the sole extra link may replace
+  // it; a plain read/unlink/create sequence can delete a newer owner's lock.
+  // PID and token make an interrupted claim identifiable on the next start.
   const claimPath = `${lockPath}.reclaim.${replacement.pid}.${replacement.ownerToken}`;
 
   try {
@@ -140,6 +146,8 @@ async function waitForLockRetry(attempt: number): Promise<void> {
 }
 
 async function removeOrphanedClaims(lockPath: string): Promise<void> {
+  // The PID is only a local liveness hint, not authentication. These owner-only
+  // files sit beside the lock and are removed only after their process dies.
   const directory = path.dirname(lockPath);
   const prefix = `${path.basename(lockPath)}.reclaim.`;
   for (const name of await readdir(directory)) {
