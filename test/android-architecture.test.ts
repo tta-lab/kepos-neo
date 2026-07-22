@@ -27,6 +27,9 @@ test("Android host boundaries are explicit extraction seams", async () => {
   const foregroundService = await readProjectFile(
     "android/app/src/main/java/io/github/ttalab/kepos/KeposForegroundService.kt",
   );
+  const mainActivity = await readProjectFile(
+    "android/app/src/main/java/io/github/ttalab/kepos/MainActivity.kt",
+  );
   const subscriberRuntime = await readProjectFile("src/runtime/subscriber.ts");
   const gateway = await readProjectFile("src/home/gateway.ts");
   const bareKitSession = await readProjectFile(
@@ -78,6 +81,9 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.match(hostBuild!, /bare-kit\/classes\.jar/);
   assert.match(hostBuild!, /libs\/bare-kit\/jni/);
   assert.match(appManifest!, /foregroundServiceType="specialUse"/);
+  assert.match(appManifest!, /android\.permission\.POST_NOTIFICATIONS/);
+  assert.match(mainActivity!, /ActivityResultContracts\.RequestPermission/);
+  assert.match(mainActivity!, /Manifest\.permission\.POST_NOTIFICATIONS/);
   assert.match(foregroundService!, /private val runtime = BareRuntime/);
   assert.match(foregroundService!, /START_STICKY/);
   assert.match(foregroundService!, /filesDir\.resolve\("subscriber"\)/);

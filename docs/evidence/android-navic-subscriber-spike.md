@@ -39,6 +39,12 @@ The instrumentation test proved that the real subscriber Worklet:
 - keeps the same runtime ID, subscriber key, and Navidrome URLs;
 - closes the Worklet and foreground service after explicit Stop.
 
+With notification permission reset on the Pixel 7a, tapping Start displayed
+the Android notification permission prompt. After the operator allowed it, the
+foreground service started and Android exposed the ongoing Kepos notification
+with its Stop action. Denial handling remains part of later ship-UI work; it
+does not prevent the subscriber service itself from starting.
+
 The test publisher key is intentionally unreachable. This verifies the offline
 side of the lifecycle without treating it as evidence of successful NAT
 traversal.
