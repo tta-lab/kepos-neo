@@ -54,8 +54,16 @@ The test publisher key is intentionally unreachable. This verifies the offline
 side of the lifecycle without treating it as evidence of successful NAT
 traversal.
 
-`npm run check` also passed 113 tests with 96.89% line, 83.81% branch, and
-92.72% function coverage. `npm run android:check` passed Kotlin/JVM tests, lint,
+On 2026-07-22, `adb install -r` updated the dogfood app to the heartbeat build
+without uninstalling it. The subscriber public-key fingerprint before and
+after the update was identical, confirming that the app-private identity was
+preserved. The embedded Android bundle was also checked byte-for-byte against
+the generated bundle and contained `kepos/control/1` and the heartbeat timeout
+path. The isolated `npm run android:device-check` gate then passed again on the
+same device without replacing or stopping the dogfood package.
+
+`npm run check` also passed 129 tests with 96.92% line, 84.69% branch, and
+92.24% function coverage. `npm run android:check` passed Kotlin/JVM tests, lint,
 the Bare bundle, and debug assembly.
 
 The arm64-only debug APK is 89 MiB. Before applying the intended spike ABI
@@ -106,12 +114,17 @@ was collected.
       run stayed in `PLAYING`, advanced across three queue items, kept the same
       Kepos PID, and returned HTTP 200 from port 17480 throughout. A 30-minute
       soak is deferred to Stage B2 rather than used as a Stage B1 merge gate.
-- [ ] Wi-Fi to cellular to Wi-Fi recovers end to end without changing the
-      configured URL. One cellular-to-Wi-Fi switch did prove that Kepos closed
-      the old outer connection and opened a new one about eight seconds later.
-      Navic playback did not resume because Android then returned
-      `UnknownHostException` for `navidrome.localhost`; that client resolver gap
-      is separate from Kepos transport recovery.
+- [x] Kepos recovers across Wi-Fi to cellular to Wi-Fi while the foreground
+      service stays in the same Android process and keeps the same subscriber
+      key. The publisher observed the old outer close and a new outer connect
+      after each switch. The fixed numeric fallback
+      `http://127.0.0.1:17481/` returned HTTP 200 within 10 seconds on cellular
+      and within 25 seconds after returning to Wi-Fi. The app PID and both
+      localhost listeners remained unchanged.
+- [ ] Navic playback using the hostname URL recovers across the same switch.
+      An earlier run reached `UnknownHostException` for
+      `navidrome.localhost`; the numeric fallback proves Kepos transport
+      recovery but does not fix that client resolver gap.
 - [ ] Restarting the kosmos-wsl publisher recovers without restarting the app.
 - [x] Android process recreation restores the listener and subscriber identity.
       Killing PID 28338 produced PID 3738 after three seconds. The foreground
@@ -130,3 +143,8 @@ Stage B1 merge gate.
 
 No private key, Navidrome credential, auth cookie, or raw state file belongs in
 this document.
+
+The Wi-Fi/cellular sample ran with the device's existing Clash VPN enabled.
+Android logs showed Kepos UDP using its configured proxy, so this sample proves
+the foreground lifecycle, outer replacement, and loopback recovery, not a pure
+direct-P2P route. The proxy configuration was left unchanged.
