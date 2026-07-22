@@ -1,4 +1,13 @@
 node_modules/
+.cache/
+android/.gradle/
+android/build/
+android/*/build/
+android/barekit-host/libs/bare-kit/
+android/app/src/main/assets/*.bundle
+android/app/src/main/addons/
+packages/*/dist/
+packages/*/*.tsbuildinfo
 tmp/
 coverage/
 lcov.info
