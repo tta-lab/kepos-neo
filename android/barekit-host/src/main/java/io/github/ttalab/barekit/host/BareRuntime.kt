@@ -9,7 +9,10 @@ import java.io.InputStream
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 interface RuntimeSession : AutoCloseable {
   fun start(
@@ -40,6 +43,7 @@ class BareRuntime(
   private var stopFuture: CompletableFuture<RuntimeSnapshot>? = null
   private var stopTimeout: AutoCloseable? = null
   private val pingFutures = mutableMapOf<Long, CompletableFuture<RuntimeSnapshot>>()
+  private val configureFutures = mutableMapOf<Long, CompletableFuture<RuntimeSnapshot>>()
   private val observers = linkedSetOf<(RuntimeSnapshot) -> Unit>()
 
   fun snapshot(): RuntimeSnapshot = state.snapshot()
@@ -59,6 +63,7 @@ class BareRuntime(
   fun start(
     source: InputStream,
     filename: String = "/kepos.bundle",
+    arguments: Array<String> = emptyArray(),
   ): RuntimeSnapshot {
     val decision = state.start()
     if (!decision.shouldCreate) {
@@ -75,7 +80,7 @@ class BareRuntime(
       created.start(
         filename,
         source,
-        arrayOf(decision.runtimeId),
+        arrayOf(decision.runtimeId, *arguments),
         { data -> receive(decision.runtimeId, data) },
         { error -> fail(decision.runtimeId, error) },
       )
@@ -110,6 +115,28 @@ class BareRuntime(
   }
 
   @Synchronized
+  fun configurePublisher(publisherKey: String): CompletableFuture<RuntimeSnapshot> {
+    require(PUBLISHER_KEY.matches(publisherKey)) {
+      "publisher key must be 32 bytes of lowercase hex"
+    }
+    val current = state.snapshot()
+    check(current.state == RuntimeState.RUNNING) {
+      "cannot configure a runtime from ${current.state}"
+    }
+    val runtimeId = checkNotNull(current.runtimeId)
+    val request = requests.request(
+      "configure",
+      buildJsonObject { put("publisherKey", publisherKey) },
+    )
+    val future = CompletableFuture<RuntimeSnapshot>()
+    configureFutures[request.id] = future
+    checkNotNull(session).write(codec.encode(request)) { error ->
+      fail(runtimeId, error)
+    }
+    return future
+  }
+
+  @Synchronized
   fun stop(timeoutMillis: Long = 2_000): CompletableFuture<RuntimeSnapshot> {
     require(timeoutMillis >= 0) { "stop timeout must not be negative" }
     stopFuture?.let { return it }
@@ -119,7 +146,7 @@ class BareRuntime(
     }
     if (current.state == RuntimeState.FAILED) {
       val runtimeId = checkNotNull(current.runtimeId)
-      cancelPings()
+      cancelRequests()
       state.stopped(runtimeId)
       notifyObservers()
       return CompletableFuture.completedFuture(state.snapshot())
@@ -179,19 +206,34 @@ class BareRuntime(
     if (data["state"]?.jsonPrimitive?.content != "running") return
     val echoUrl = data["echoUrl"]?.jsonPrimitive?.content
       ?: throw IllegalArgumentException("running runtime has no echo URL")
-    state.running(runtimeId, echoUrl)
+    state.running(
+      runtimeId = runtimeId,
+      echoUrl = echoUrl,
+      subscriberPublicKey = data["subscriberPublicKey"]?.jsonPrimitive?.content,
+      configured = data["configured"]?.jsonPrimitive?.booleanOrNull ?: false,
+      connection = data["connection"]?.jsonPrimitive?.content,
+      navidromeUrl = data["navidromeUrl"]?.jsonPrimitive?.content,
+      navidromeFallbackUrl = data["navidromeFallbackUrl"]?.jsonPrimitive?.content,
+    )
     notifyObservers()
   }
 
   private fun receiveResponse(runtimeId: String, response: ResponseEnvelope) {
     requests.accept(response)
     pingFutures.remove(response.id)?.complete(state.snapshot())
+    configureFutures.remove(response.id)?.complete(state.snapshot())
     if (response.id == stopRequestId) finishStop(runtimeId)
   }
 
   private fun receiveError(runtimeId: String, error: ErrorEnvelope) {
     requests.accept(error)
-    fail(runtimeId, IllegalStateException("${error.error.code}: ${error.error.message}"))
+    val failure = IllegalStateException("${error.error.code}: ${error.error.message}")
+    val configure = configureFutures.remove(error.id)
+    if (configure != null) {
+      configure.completeExceptionally(failure)
+      return
+    }
+    fail(runtimeId, failure)
   }
 
   @Synchronized
@@ -200,7 +242,7 @@ class BareRuntime(
     stopTimeout?.close()
     stopTimeout = null
     closeSession()
-    cancelPings()
+    cancelRequests()
     state.stopped(runtimeId)
     val stopped = state.snapshot()
     notifyObservers()
@@ -221,6 +263,7 @@ class BareRuntime(
     stopFuture = null
     stopRequestId = null
     rejectPings(error)
+    rejectConfigurations(error)
   }
 
   private fun rejectPings(error: Throwable) {
@@ -232,6 +275,18 @@ class BareRuntime(
     rejectPings(CancellationException("runtime stopped before ping completed"))
   }
 
+  private fun rejectConfigurations(error: Throwable) {
+    configureFutures.values.forEach { it.completeExceptionally(error) }
+    configureFutures.clear()
+  }
+
+  private fun cancelRequests() {
+    cancelPings()
+    rejectConfigurations(
+      CancellationException("runtime stopped before configuration completed"),
+    )
+  }
+
   private fun closeSession() {
     session?.close()
     session = null
@@ -240,5 +295,9 @@ class BareRuntime(
   private fun notifyObservers() {
     val snapshot = state.snapshot()
     observers.toList().forEach { it(snapshot) }
+  }
+
+  private companion object {
+    val PUBLISHER_KEY = Regex("^[0-9a-f]{64}$")
   }
 }

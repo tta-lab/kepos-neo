@@ -47,7 +47,11 @@ function fakeCli(): {
     },
     setupSubscriber: async (options) => {
       calls.setupSubscriber.push(options);
-      return { created: true, publicKey: "22".repeat(32) };
+      return {
+        created: true,
+        configured: false,
+        publicKey: "22".repeat(32),
+      };
     },
     setSubscriberPublisher: async (options) => {
       calls.setSubscriberPublisher.push(options);

@@ -27,6 +27,8 @@ test("Android host boundaries are explicit extraction seams", async () => {
   const foregroundService = await readProjectFile(
     "android/app/src/main/java/io/github/ttalab/kepos/KeposForegroundService.kt",
   );
+  const subscriberRuntime = await readProjectFile("src/runtime/subscriber.ts");
+  const gateway = await readProjectFile("src/home/gateway.ts");
   const bareKitSession = await readProjectFile(
     "android/barekit-host/src/main/java/io/github/ttalab/barekit/host/BareKitRuntimeSession.kt",
   );
@@ -71,12 +73,16 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.notEqual(workletPackage, null, "missing product Worklet package");
   assert.match(settings!, /include\(":app", ":barekit-host"\)/);
   assert.match(appBuild!, /implementation\(project\(":barekit-host"\)\)/);
+  assert.match(appBuild!, /abiFilters \+= "arm64-v8a"/);
   assert.doesNotMatch(appBuild!, /bare-kit\/classes\.jar/);
   assert.match(hostBuild!, /bare-kit\/classes\.jar/);
   assert.match(hostBuild!, /libs\/bare-kit\/jni/);
   assert.match(appManifest!, /foregroundServiceType="specialUse"/);
   assert.match(foregroundService!, /private val runtime = BareRuntime/);
   assert.match(foregroundService!, /START_STICKY/);
+  assert.match(foregroundService!, /filesDir\.resolve\("subscriber"\)/);
+  assert.match(foregroundService!, /arguments\s*=\s*arrayOf\(stateDir\.absolutePath\)/);
+  assert.doesNotMatch(`${subscriberRuntime}\n${gateway}`, /\bAbortController\b/);
   assert.doesNotMatch(workflow!, /uses: actions\/(?:checkout|setup-node)@v\d/);
   assert.ok(
     bareKitSession!.indexOf("worklet.start") < bareKitSession!.indexOf("armRead()"),

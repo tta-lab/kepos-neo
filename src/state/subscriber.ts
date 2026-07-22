@@ -28,6 +28,7 @@ export interface SetupSubscriberOptions {
 
 export interface SetupSubscriberResult {
   created: boolean;
+  configured: boolean;
   publicKey: string;
 }
 
@@ -48,7 +49,11 @@ export async function setupSubscriber(
   const stateDir = path.resolve(options.stateDir);
   if (await pathExists(stateDir)) {
     const identity = await readSubscriberIdentity(stateDir);
-    return { created: false, publicKey: identity.publicKey };
+    return {
+      created: false,
+      configured: await pathExists(path.join(stateDir, contactFileName)),
+      publicKey: identity.publicKey,
+    };
   }
 
   const identity = generateClientIdentity();
@@ -56,7 +61,7 @@ export async function setupSubscriber(
     stateDir,
     new Map([[identityFileName, serializeClientIdentity(identity)]]),
   );
-  return { created: true, publicKey: identity.publicKey };
+  return { created: true, configured: false, publicKey: identity.publicKey };
 }
 
 export async function setSubscriberPublisher(

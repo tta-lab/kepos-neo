@@ -18,16 +18,19 @@ import io.github.ttalab.kepos.ui.KeposScreen
 class MainActivity : ComponentActivity() {
   private var snapshot by mutableStateOf(RuntimeSnapshot(RuntimeState.STOPPED))
   private var subscription: AutoCloseable? = null
+  private var service: KeposForegroundService.LocalBinder? = null
   private var bound = false
   private val connection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName, service: IBinder) {
       val binder = service as KeposForegroundService.LocalBinder
+      this@MainActivity.service = binder
       subscription = binder.observe { snapshot = it }
     }
 
     override fun onServiceDisconnected(name: ComponentName) {
       subscription?.close()
       subscription = null
+      service = null
       snapshot = RuntimeSnapshot(RuntimeState.STOPPED)
     }
   }
@@ -39,6 +42,9 @@ class MainActivity : ComponentActivity() {
         snapshot = snapshot,
         onStart = { KeposForegroundService.start(this) },
         onStop = { KeposForegroundService.stop(this) },
+        onConfigure = { publisherKey ->
+          service?.configurePublisher(publisherKey)
+        },
       )
     }
   }
@@ -55,6 +61,7 @@ class MainActivity : ComponentActivity() {
   override fun onStop() {
     subscription?.close()
     subscription = null
+    service = null
     if (bound) unbindService(connection)
     bound = false
     super.onStop()

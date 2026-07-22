@@ -138,6 +138,19 @@ test("Android Worklet controller configures one publisher without stopping", asy
 
   assert.equal(configuredKey, "ab".repeat(32));
   assert.equal(stopped, false);
+  assert.deepEqual(output.at(-2), {
+    version: 1,
+    kind: "event",
+    event: "runtime.stateChanged",
+    data: {
+      state: "running",
+      runtimeId: "runtime-1",
+      echoUrl: "http://127.0.0.1:17482/",
+      subscriberPublicKey: "cd".repeat(32),
+      connection: "connecting",
+      navidromeUrl: "http://navidrome.localhost:17480/",
+    },
+  });
   assert.deepEqual(output.at(-1), {
     version: 1,
     kind: "response",
@@ -161,4 +174,11 @@ test("Android Worklet controller configures one publisher without stopping", asy
       navidromeUrl: "http://navidrome.localhost:17480/",
     },
   });
+
+  configuredKey = undefined;
+  controller.publishStatus();
+  assert.equal(
+    (output.at(-1) as { data?: { connection?: string } }).data?.connection,
+    "offline",
+  );
 });

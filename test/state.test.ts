@@ -41,6 +41,11 @@ test("subscriber state keeps the current identity file and replaces only its pub
   const identityBytes = await readFile(identityPath);
 
   assert.equal(first.created, true);
+  assert.deepEqual(first, {
+    created: true,
+    configured: false,
+    publicKey: first.publicKey,
+  });
   assert.equal(
     parseClientIdentity(await readJson(identityPath)).publicKey,
     first.publicKey,
@@ -51,6 +56,12 @@ test("subscriber state keeps the current identity file and replaces only its pub
     stateDir,
     label: "kosmos",
     publisherKey: "11".repeat(32),
+  });
+
+  assert.deepEqual(await setupSubscriber({ stateDir }), {
+    created: false,
+    configured: true,
+    publicKey: first.publicKey,
   });
   await setSubscriberPublisher({
     stateDir,

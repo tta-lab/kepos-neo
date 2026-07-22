@@ -26,6 +26,11 @@ export class WorkletController {
     this.emitState();
   }
 
+  publishStatus(): void {
+    if (this.state !== "running") return;
+    this.emitState();
+  }
+
   async receive(chunk: Uint8Array): Promise<void> {
     for (const envelope of this.decoder.push(chunk)) {
       if (envelope.kind !== "request") {
@@ -74,10 +79,9 @@ export class WorkletController {
       if (!this.options.configurePublisher) {
         throw new Error("publisher configuration is unavailable");
       }
-      this.respond(
-        request,
-        await this.options.configurePublisher(publisherKey),
-      );
+      const result = await this.options.configurePublisher(publisherKey);
+      this.emitState();
+      this.respond(request, result);
     } catch (error) {
       this.write({
         version: 1,
