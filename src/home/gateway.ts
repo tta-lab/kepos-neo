@@ -5,6 +5,11 @@ import {
 } from "node:net";
 import type { Duplex } from "node:stream";
 
+import {
+  CancellationController,
+  type CancellationSignal,
+} from "../runtime/cancellation.js";
+
 export const DEFAULT_GATEWAY_PORT = 17_480;
 
 const maximumHeaderBytes = 16 * 1024;
@@ -13,7 +18,8 @@ const serviceHostPattern = /^([a-z][a-z0-9-]*)\.localhost(?::\d+)?$/i;
 
 export interface StartHttpGatewayOptions {
   port?: number;
-  open(serviceId: string): Promise<Duplex>;
+  acquisitionTimeoutMs?: number;
+  open(serviceId: string, signal?: CancellationSignal): Promise<Duplex>;
 }
 
 export interface RunningHttpGateway {
@@ -26,7 +32,11 @@ export async function startHttpGateway(
   options: StartHttpGatewayOptions,
 ): Promise<RunningHttpGateway> {
   const server = createServer({ allowHalfOpen: true }, (socket) => {
-    routeSocket(socket, options.open);
+    routeSocket(
+      socket,
+      options.open,
+      options.acquisitionTimeoutMs ?? 10_000,
+    );
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -53,7 +63,8 @@ export async function startHttpGateway(
 
 function routeSocket(
   socket: Socket,
-  open: (serviceId: string) => Promise<Duplex>,
+  open: (serviceId: string, signal?: CancellationSignal) => Promise<Duplex>,
+  acquisitionTimeoutMs: number,
 ): void {
   let buffered = Buffer.alloc(0);
   let tunnel: Duplex | undefined;
@@ -71,6 +82,7 @@ function routeSocket(
     if (headerEnd === -1) return;
 
     socket.pause();
+    socket.setTimeout(0);
     socket.off("data", onData);
     const serviceId = parseServiceId(
       buffered.subarray(0, headerEnd).toString("latin1"),
@@ -79,8 +91,19 @@ function routeSocket(
       replyAndClose(socket, 421, "Misdirected Request");
       return;
     }
-    void open(serviceId)
+    const abort = new CancellationController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      abort.abort();
+      replyAndClose(socket, 503, "Service Unavailable", {
+        "Retry-After": "1",
+      });
+    }, acquisitionTimeoutMs);
+    socket.once("close", () => abort.abort());
+    void open(serviceId, abort.signal)
       .then((opened) => {
+        clearTimeout(timeout);
         tunnel = opened;
         if (socket.destroyed) {
           tunnel.destroy();
@@ -95,7 +118,10 @@ function routeSocket(
         tunnel.once("error", (error) => socket.destroy(error));
         socket.resume();
       })
-      .catch(() => replyAndClose(socket, 502, "Bad Gateway"));
+      .catch(() => {
+        clearTimeout(timeout);
+        if (!timedOut) replyAndClose(socket, 502, "Bad Gateway");
+      });
   }
 }
 
@@ -119,10 +145,14 @@ function replyAndClose(
   socket: Socket,
   status: number,
   reason: string,
+  headers: Record<string, string> = {},
 ): void {
   if (socket.destroyed) return;
+  const encodedHeaders = Object.entries(headers)
+    .map(([name, value]) => `${name}: ${value}\r\n`)
+    .join("");
   socket.end(
-    `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+    `HTTP/1.1 ${status} ${reason}\r\n${encodedHeaders}Connection: close\r\nContent-Length: 0\r\n\r\n`,
   );
 }
 

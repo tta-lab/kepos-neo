@@ -27,6 +27,11 @@ test("Android host boundaries are explicit extraction seams", async () => {
   const foregroundService = await readProjectFile(
     "android/app/src/main/java/io/github/ttalab/kepos/KeposForegroundService.kt",
   );
+  const mainActivity = await readProjectFile(
+    "android/app/src/main/java/io/github/ttalab/kepos/MainActivity.kt",
+  );
+  const subscriberRuntime = await readProjectFile("src/runtime/subscriber.ts");
+  const gateway = await readProjectFile("src/home/gateway.ts");
   const bareKitSession = await readProjectFile(
     "android/barekit-host/src/main/java/io/github/ttalab/barekit/host/BareKitRuntimeSession.kt",
   );
@@ -46,7 +51,12 @@ test("Android host boundaries are explicit extraction seams", async () => {
   );
   assert.equal(
     rootPackage.scripts?.["android:bundle"],
-    "npm run build:packages && tsx scripts/build-android-worklet.ts",
+    "npm run build:packages && tsc -p tsconfig.bare.json && tsx scripts/build-android-worklet.ts",
+  );
+  assert.notEqual(
+    await readProjectFile("src/android/worklet/main.ts"),
+    null,
+    "missing real subscriber Worklet entry",
   );
   assert.notEqual(
     await readProjectFile("scripts/fetch-bare-kit.ts"),
@@ -66,12 +76,19 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.notEqual(workletPackage, null, "missing product Worklet package");
   assert.match(settings!, /include\(":app", ":barekit-host"\)/);
   assert.match(appBuild!, /implementation\(project\(":barekit-host"\)\)/);
+  assert.match(appBuild!, /abiFilters \+= "arm64-v8a"/);
   assert.doesNotMatch(appBuild!, /bare-kit\/classes\.jar/);
   assert.match(hostBuild!, /bare-kit\/classes\.jar/);
   assert.match(hostBuild!, /libs\/bare-kit\/jni/);
   assert.match(appManifest!, /foregroundServiceType="specialUse"/);
+  assert.match(appManifest!, /android\.permission\.POST_NOTIFICATIONS/);
+  assert.match(mainActivity!, /ActivityResultContracts\.RequestPermission/);
+  assert.match(mainActivity!, /Manifest\.permission\.POST_NOTIFICATIONS/);
   assert.match(foregroundService!, /private val runtime = BareRuntime/);
   assert.match(foregroundService!, /START_STICKY/);
+  assert.match(foregroundService!, /filesDir\.resolve\("subscriber"\)/);
+  assert.match(foregroundService!, /arguments\s*=\s*arrayOf\(stateDir\.absolutePath\)/);
+  assert.doesNotMatch(`${subscriberRuntime}\n${gateway}`, /\bAbortController\b/);
   assert.doesNotMatch(workflow!, /uses: actions\/(?:checkout|setup-node)@v\d/);
   assert.ok(
     bareKitSession!.indexOf("worklet.start") < bareKitSession!.indexOf("armRead()"),
@@ -81,4 +98,23 @@ test("Android host boundaries are explicit extraction seams", async () => {
     bareKitSession!.indexOf("worklet.start") < bareKitSession!.indexOf("IPC(worklet)"),
     "Bare Kit IPC must be created after the Worklet starts",
   );
+});
+
+test("Android subscriber waits for startup and exposes both local HTTP URLs", async () => {
+  const worklet = await readProjectFile("src/android/worklet/main.ts");
+  const runtimeState = await readProjectFile(
+    "android/barekit-host/src/main/java/io/github/ttalab/barekit/host/RuntimeStateMachine.kt",
+  );
+  const screen = await readProjectFile(
+    "android/app/src/main/java/io/github/ttalab/kepos/ui/KeposScreen.kt",
+  );
+  const evidence = await readProjectFile(
+    "docs/evidence/android-navic-subscriber-spike.md",
+  );
+
+  assert.match(worklet!, /await connectTask/);
+  assert.match(worklet!, /homeUrl/);
+  assert.match(runtimeState!, /val homeUrl: String\?/);
+  assert.match(screen!, /Copy Home URL/);
+  assert.doesNotMatch(evidence!, /124\.160\.204\.171/);
 });

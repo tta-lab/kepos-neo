@@ -203,6 +203,20 @@ test("Bare host protocol rejects invalid request ids and methods", () => {
   );
 });
 
+test("Bare host protocol carries publisher configuration without exposing eval", () => {
+  const request: RequestEnvelope = {
+    version: 1,
+    kind: "request",
+    id: 11,
+    method: "configure",
+    params: {
+      publisherKey: "ab".repeat(32),
+    },
+  };
+
+  assert.deepEqual(parseEnvelope(request), request);
+});
+
 function rawFrame(payload: Uint8Array): Uint8Array {
   const frame = new Uint8Array(4 + payload.byteLength);
   new DataView(frame.buffer).setUint32(0, payload.byteLength);

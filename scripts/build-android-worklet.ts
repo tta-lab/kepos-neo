@@ -9,9 +9,11 @@ const addons = path.join(repository, "android", "app", "src", "main", "addons");
 const bundle = path.join(assets, "kepos.bundle");
 const entry = path.join(
   repository,
-  "packages",
-  "kepos-android-worklet",
-  "dist",
+  ".build",
+  "android",
+  "src",
+  "android",
+  "worklet",
   "main.js",
 );
 
@@ -33,7 +35,7 @@ await run("bare-link", [
   "android",
   "--out",
   addons,
-  path.join(repository, "packages", "kepos-android-worklet"),
+  repository,
 ]);
 
 process.stdout.write("Android Worklet bundle and linked addons are ready\n");

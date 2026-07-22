@@ -16,3 +16,4 @@ lcov.info
 .env.*
 !.env.example
 *.local.json
+.build/

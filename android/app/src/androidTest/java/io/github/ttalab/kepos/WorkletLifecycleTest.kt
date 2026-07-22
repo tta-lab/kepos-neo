@@ -10,13 +10,14 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
-import java.net.HttpURLConnection
-import java.net.URL
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -44,31 +45,49 @@ class WorkletLifecycleTest {
     val binder = connection.awaitBinder()
     val first = binder.awaitState(RuntimeState.RUNNING)
     assertEquals(first.runtimeId, binder.ping().get(10, TimeUnit.SECONDS).runtimeId)
-    assertEquals("kepos worklet ok", get(checkNotNull(first.echoUrl)))
+    assertNotNull(first.subscriberPublicKey)
+    assertTrue(checkNotNull(first.subscriberPublicKey).matches(Regex("^[0-9a-f]{64}$")))
+    assertEquals("http://home.localhost:17480/", first.homeUrl)
+    assertEquals("http://navidrome.localhost:17480/", first.navidromeUrl)
+    assertEquals("http://127.0.0.1:17481/", first.navidromeFallbackUrl)
+    val configured = binder.configurePublisher("ab".repeat(32)).get(10, TimeUnit.SECONDS)
+    assertTrue(configured.configured)
+    assertLoopbackListener(17_480)
+    assertLoopbackListener(17_481)
 
     ActivityScenario.launch(MainActivity::class.java).use { activity ->
       activity.recreate()
       val afterRecreate = binder.awaitState(RuntimeState.RUNNING)
       assertEquals(first.runtimeId, afterRecreate.runtimeId)
-      assertEquals(first.echoUrl, afterRecreate.echoUrl)
+      assertEquals(first.subscriberPublicKey, afterRecreate.subscriberPublicKey)
+      assertEquals(first.homeUrl, afterRecreate.homeUrl)
+      assertEquals(first.navidromeUrl, afterRecreate.navidromeUrl)
     }
 
     val afterActivityClosed = binder.awaitState(RuntimeState.RUNNING)
     assertEquals(first.runtimeId, afterActivityClosed.runtimeId)
-    assertEquals(first.echoUrl, afterActivityClosed.echoUrl)
+    assertEquals(first.subscriberPublicKey, afterActivityClosed.subscriberPublicKey)
     assertEquals(first.runtimeId, binder.ping().get(10, TimeUnit.SECONDS).runtimeId)
-    assertEquals("kepos worklet ok", get(checkNotNull(afterActivityClosed.echoUrl)))
 
     KeposForegroundService.stop(context)
     binder.awaitState(RuntimeState.STOPPED)
-    assertThrows(Exception::class.java) { get(checkNotNull(first.echoUrl)) }
   }
 
-  private fun get(url: String): String {
-    val connection = URL(url).openConnection() as HttpURLConnection
-    connection.connectTimeout = 2_000
-    connection.readTimeout = 2_000
-    return connection.inputStream.bufferedReader().use { it.readText() }
+  private fun assertLoopbackListener(port: Int) {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+    var lastError: Exception? = null
+    while (System.nanoTime() < deadline) {
+      try {
+        Socket().use { socket ->
+          socket.connect(InetSocketAddress("127.0.0.1", port), 500)
+        }
+        return
+      } catch (error: Exception) {
+        lastError = error
+        Thread.sleep(50)
+      }
+    }
+    throw AssertionError("loopback listener $port did not start", lastError)
   }
 
   private class TestServiceConnection(private val context: Context) : AutoCloseable {

@@ -1,3 +1,4 @@
+import b4a from "b4a";
 import { createConnection, type Socket } from "node:net";
 
 import { startHomeServer, type RunningHomeServer } from "../home/server.js";
@@ -50,7 +51,7 @@ export async function startPublisher(
 ): Promise<RunningPublisher> {
   const { config, manifest } = await loadPublisherState(options.stateDir);
   const keyPair = keyPairFromSeed(config.seed);
-  const publisherKey = keyPair.publicKey.toString("hex");
+  const publisherKey = b4a.toString(keyPair.publicKey, "hex");
   const home = await startHomeServer({
     publisherKey,
     displayName: manifest.displayName,
@@ -77,7 +78,7 @@ export async function startPublisher(
   const server = dht.createServer(
     {
       firewall: (remotePublicKey) => {
-        const rejected = !allow.has(remotePublicKey.toString("hex"));
+        const rejected = !allow.has(b4a.toString(remotePublicKey, "hex"));
         if (rejected) {
           const observe = createObservationEmitter({
             observe: options.observe,

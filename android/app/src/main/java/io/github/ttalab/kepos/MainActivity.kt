@@ -1,13 +1,17 @@
 package io.github.ttalab.kepos
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -18,16 +22,24 @@ import io.github.ttalab.kepos.ui.KeposScreen
 class MainActivity : ComponentActivity() {
   private var snapshot by mutableStateOf(RuntimeSnapshot(RuntimeState.STOPPED))
   private var subscription: AutoCloseable? = null
+  private var service: KeposForegroundService.LocalBinder? = null
   private var bound = false
+  private val requestNotificationPermission = registerForActivityResult(
+    ActivityResultContracts.RequestPermission(),
+  ) {
+    KeposForegroundService.start(this)
+  }
   private val connection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName, service: IBinder) {
       val binder = service as KeposForegroundService.LocalBinder
+      this@MainActivity.service = binder
       subscription = binder.observe { snapshot = it }
     }
 
     override fun onServiceDisconnected(name: ComponentName) {
       subscription?.close()
       subscription = null
+      service = null
       snapshot = RuntimeSnapshot(RuntimeState.STOPPED)
     }
   }
@@ -37,8 +49,11 @@ class MainActivity : ComponentActivity() {
     setContent {
       KeposScreen(
         snapshot = snapshot,
-        onStart = { KeposForegroundService.start(this) },
+        onStart = { startRuntime() },
         onStop = { KeposForegroundService.stop(this) },
+        onConfigure = { publisherKey ->
+          service?.configurePublisher(publisherKey)
+        },
       )
     }
   }
@@ -55,8 +70,20 @@ class MainActivity : ComponentActivity() {
   override fun onStop() {
     subscription?.close()
     subscription = null
+    service = null
     if (bound) unbindService(connection)
     bound = false
     super.onStop()
+  }
+
+  private fun startRuntime() {
+    if (
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+      checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+    ) {
+      requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+      return
+    }
+    KeposForegroundService.start(this)
   }
 }

@@ -1,6 +1,8 @@
-import { randomBytes } from "node:crypto";
-import { createRequire } from "node:module";
+import compactModule from "compact-encoding";
+import b4a from "b4a";
+import crypto from "hypercore-crypto";
 import { Duplex } from "node:stream";
+import ProtomuxModule from "protomux";
 
 import {
   createObservationId,
@@ -12,9 +14,8 @@ import {
   type Observe,
 } from "./observability.js";
 
-const require = createRequire(import.meta.url);
-const Protomux = require("protomux") as ProtomuxConstructor;
-const compact = require("compact-encoding") as CompactEncoding;
+const Protomux = ProtomuxModule as ProtomuxConstructor;
+const compact = compactModule as CompactEncoding;
 
 const protocol = "kepos/tcp/1";
 
@@ -25,7 +26,7 @@ interface Encoding<T> {
 }
 
 interface CompactEncoding {
-  buffer: Encoding<Buffer>;
+  buffer: Encoding<Uint8Array>;
   none: Encoding<null>;
   string: Encoding<string>;
 }
@@ -52,7 +53,7 @@ interface MuxChannel {
 interface MuxInstance {
   createChannel: (options: {
     protocol: string;
-    id: Buffer;
+    id: Uint8Array;
     handshake: Encoding<string>;
     onopen?: (handshake: string) => void | Promise<void>;
     onclose?: () => void;
@@ -60,7 +61,7 @@ interface MuxInstance {
   }) => MuxChannel | null;
   pair: (
     options: { protocol: string },
-    callback: (id: Buffer) => void | Promise<void>,
+    callback: (id: Uint8Array) => void | Promise<void>,
   ) => void;
   unpair: (options: { protocol: string }) => void;
 }
@@ -70,7 +71,7 @@ interface ProtomuxConstructor {
 }
 
 interface TunnelMessages {
-  data: MuxMessage<Buffer>;
+  data: MuxMessage<Uint8Array>;
   fin: MuxMessage<null>;
   pause: MuxMessage<null>;
   reset: MuxMessage<string>;
@@ -113,7 +114,7 @@ class MuxTunnel extends Duplex {
   private localPaused = false;
   private remotePaused = false;
   private pendingWrite?: {
-    chunk: Buffer;
+    chunk: Uint8Array;
     callback: (error?: Error | null) => void;
   };
   private pendingDrain?: (error?: Error | null) => void;
@@ -171,10 +172,10 @@ class MuxTunnel extends Duplex {
     this.destroy();
   }
 
-  receive(chunk: Buffer): void {
+  receive(chunk: Uint8Array): void {
     if (this.destroyed) return;
     this.observeBytes(this.options.incomingDirection, chunk);
-    if (!this.push(Buffer.from(chunk)) && !this.localPaused) {
+    if (!this.push(b4a.from(chunk)) && !this.localPaused) {
       this.localPaused = true;
       this.options.emit("channel.pause", {
         direction: this.options.incomingDirection,
@@ -253,11 +254,11 @@ class MuxTunnel extends Duplex {
   }
 
   override _write(
-    chunk: Buffer,
+    data: Uint8Array,
     _encoding: BufferEncoding,
     callback: (error?: Error | null) => void,
   ): void {
-    const copy = Buffer.from(chunk);
+    const copy = b4a.from(data as Uint8Array);
     if (this.remotePaused) {
       this.pendingWrite = { chunk: copy, callback };
       return;
@@ -305,7 +306,7 @@ class MuxTunnel extends Duplex {
   }
 
   private sendData(
-    chunk: Buffer,
+    chunk: Uint8Array,
     callback: (error?: Error | null) => void,
   ): void {
     this.observeBytes(this.options.outgoingDirection, chunk);
@@ -325,7 +326,7 @@ class MuxTunnel extends Duplex {
 
   private observeBytes(
     direction: ObservationDirection,
-    chunk: Buffer,
+    chunk: Uint8Array,
   ): void {
     if (!this.options.measure) return;
     const observedAt = this.options.now();
@@ -366,12 +367,12 @@ export function createMuxSubscriber(
 
   return {
     async open(serviceId: string): Promise<Duplex> {
-      const id = randomBytes(16);
+      const id = crypto.randomBytes(16);
       const emit = createObservationEmitter({
         observe: options.observe,
         role: "subscriber",
         outerId,
-        channelId: id.toString("hex"),
+        channelId: b4a.toString(id, "hex"),
         serviceId,
         now,
       });
@@ -421,7 +422,7 @@ export function createMuxPublisher(
       observe: options.observe,
       role: "publisher",
       outerId,
-      channelId: id.toString("hex"),
+      channelId: b4a.toString(id, "hex"),
       now,
     });
     const emit: EmitObservation = (event, fields = {}) =>
@@ -473,7 +474,7 @@ export function createMuxPublisher(
 
 function createTunnel(
   mux: MuxInstance,
-  id: Buffer,
+  id: Uint8Array,
   role: ObservationRole,
   emit: EmitObservation,
   measure: boolean,

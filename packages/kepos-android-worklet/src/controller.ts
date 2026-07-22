@@ -10,11 +10,14 @@ export interface WorkletControllerOptions {
   echoUrl: string;
   write(frame: Uint8Array): void;
   stopEcho(): Promise<void>;
+  configurePublisher?(publisherKey: string): Promise<unknown>;
+  status?(): Record<string, unknown>;
 }
 
 export class WorkletController {
   private readonly decoder = new FrameDecoder();
   private state: WorkletState = "starting";
+  private receiveTask: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: WorkletControllerOptions) {}
 
@@ -24,7 +27,18 @@ export class WorkletController {
     this.emitState();
   }
 
-  async receive(chunk: Uint8Array): Promise<void> {
+  publishStatus(): void {
+    if (this.state !== "running") return;
+    this.emitState();
+  }
+
+  receive(chunk: Uint8Array): Promise<void> {
+    const task = this.receiveTask.then(() => this.receiveChunk(chunk));
+    this.receiveTask = task.catch(() => undefined);
+    return task;
+  }
+
+  private async receiveChunk(chunk: Uint8Array): Promise<void> {
     for (const envelope of this.decoder.push(chunk)) {
       if (envelope.kind !== "request") {
         throw new Error("Worklet accepts only control requests");
@@ -43,10 +57,49 @@ export class WorkletController {
         state: this.state,
         runtimeId: this.options.runtimeId,
         echoUrl: this.options.echoUrl,
+        ...this.options.status?.(),
       });
       return;
     }
+    if (request.method === "configure") {
+      await this.configure(request);
+      return;
+    }
     await this.stop(request);
+  }
+
+  private async configure(request: RequestEnvelope): Promise<void> {
+    try {
+      const params = request.params;
+      if (
+        typeof params !== "object" ||
+        params === null ||
+        Array.isArray(params) ||
+        typeof (params as Record<string, unknown>).publisherKey !== "string"
+      ) {
+        throw new Error("publisherKey is required");
+      }
+      const publisherKey = (params as { publisherKey: string }).publisherKey;
+      if (!/^[0-9a-f]{64}$/.test(publisherKey)) {
+        throw new Error("publisherKey must be 32 bytes of lowercase hex");
+      }
+      if (!this.options.configurePublisher) {
+        throw new Error("publisher configuration is unavailable");
+      }
+      const result = await this.options.configurePublisher(publisherKey);
+      this.emitState();
+      this.respond(request, result);
+    } catch (error) {
+      this.write({
+        version: 1,
+        kind: "error",
+        id: request.id,
+        error: {
+          code: "invalid_configuration",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 
   private async stop(request: RequestEnvelope): Promise<void> {
@@ -66,7 +119,9 @@ export class WorkletController {
       data: {
         state: this.state,
         runtimeId: this.options.runtimeId,
-        ...(this.state === "running" ? { echoUrl: this.options.echoUrl } : {}),
+        ...(this.state === "running"
+          ? { echoUrl: this.options.echoUrl, ...this.options.status?.() }
+          : {}),
       },
     });
   }

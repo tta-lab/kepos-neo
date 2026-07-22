@@ -10,14 +10,44 @@ import java.io.InputStream
 import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BareRuntimeTest {
+  @Test
+  fun startPassesAppPrivateArgumentsAfterTheRuntimeId() {
+    val session = FakeRuntimeSession()
+    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
+    val startWithArguments = BareRuntime::class.java.methods.singleOrNull {
+      it.name == "start" && it.parameterTypes.size == 3
+    }
+
+    assertNotNull(startWithArguments)
+    if (startWithArguments == null) return
+    startWithArguments.invoke(
+      runtime,
+      ByteArrayInputStream("bundle".encodeToByteArray()),
+      "/kepos.bundle",
+      arrayOf("/data/user/0/io.github.ttalab.kepos/files/subscriber"),
+    )
+
+    assertArrayEquals(
+      arrayOf(
+        "runtime-1",
+        "/data/user/0/io.github.ttalab.kepos/files/subscriber",
+      ),
+      session.arguments,
+    )
+  }
+
   @Test
   fun duplicateStartOwnsOneSessionAndAcknowledgedStopClosesIt() {
     val session = FakeRuntimeSession()
@@ -37,16 +67,29 @@ class BareRuntimeTest {
           put("state", "running")
           put("runtimeId", "runtime-1")
           put("echoUrl", "http://127.0.0.1:17482/")
+          put("subscriberPublicKey", "cd".repeat(32))
+          put("configured", true)
+          put("connection", "connecting")
+          put("homeUrl", "http://home.localhost:17480/")
+          put("navidromeUrl", "http://navidrome.localhost:17480/")
+          put("navidromeFallbackUrl", "http://127.0.0.1:17481/")
         },
       ),
     )
 
     assertEquals(1, session.starts)
+    assertTrue(runtime.snapshot().toString().contains("subscriberPublicKey=${"cd".repeat(32)}"))
     assertEquals(
       RuntimeSnapshot(
         RuntimeState.RUNNING,
         "runtime-1",
         "http://127.0.0.1:17482/",
+        subscriberPublicKey = "cd".repeat(32),
+        configured = true,
+        connection = "connecting",
+        homeUrl = "http://home.localhost:17480/",
+        navidromeUrl = "http://navidrome.localhost:17480/",
+        navidromeFallbackUrl = "http://127.0.0.1:17481/",
       ),
       runtime.snapshot(),
     )
@@ -129,6 +172,34 @@ class BareRuntimeTest {
     )
 
     assertEquals("runtime-1", ping.get(1, TimeUnit.SECONDS).runtimeId)
+  }
+
+  @Test
+  fun configurePublisherCompletesWithTheUpdatedRuntimeState() {
+    val session = FakeRuntimeSession()
+    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
+    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
+    session.emit(runningEvent(configured = false, connection = "offline"))
+
+    val configured = runtime.configurePublisher("ab".repeat(32))
+    val request = session.writes.single() as RequestEnvelope
+    assertEquals("configure", request.method)
+    assertEquals("ab".repeat(32), request.params?.jsonObject?.get("publisherKey")?.jsonPrimitive?.content)
+    assertFalse(configured.isDone)
+
+    session.emit(runningEvent(configured = true, connection = "connecting"))
+    session.emit(
+      ResponseEnvelope(
+        1,
+        "response",
+        request.id,
+        buildJsonObject { put("connection", "connecting") },
+      ),
+    )
+
+    val snapshot = configured.get(1, TimeUnit.SECONDS)
+    assertTrue(snapshot.configured)
+    assertEquals("connecting", snapshot.connection)
   }
 
   @Test
@@ -267,6 +338,7 @@ class BareRuntimeTest {
     private lateinit var onFailure: (Throwable) -> Unit
     var starts = 0
     var closes = 0
+    var arguments = emptyArray<String>()
     val writes = mutableListOf<HostEnvelope>()
 
     override fun start(
@@ -277,6 +349,7 @@ class BareRuntimeTest {
       onFailure: (Throwable) -> Unit,
     ) {
       starts++
+      this.arguments = arguments
       this.onData = onData
       this.onFailure = onFailure
     }
@@ -297,6 +370,23 @@ class BareRuntimeTest {
       closes++
     }
   }
+
+  private fun runningEvent(configured: Boolean, connection: String) = EventEnvelope(
+    1,
+    "event",
+    "runtime.stateChanged",
+    buildJsonObject {
+      put("state", "running")
+      put("runtimeId", "runtime-1")
+      put("echoUrl", "http://navidrome.localhost:17480/")
+      put("subscriberPublicKey", "cd".repeat(32))
+      put("configured", configured)
+      put("connection", connection)
+      put("homeUrl", "http://home.localhost:17480/")
+      put("navidromeUrl", "http://navidrome.localhost:17480/")
+      put("navidromeFallbackUrl", "http://127.0.0.1:17481/")
+    },
+  )
 
   private class FakeScheduler : RuntimeTimeoutScheduler {
     private var task: (() -> Unit)? = null

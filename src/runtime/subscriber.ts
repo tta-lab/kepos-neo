@@ -7,6 +7,10 @@ import type { Duplex } from "node:stream";
 
 import { startHttpGateway } from "../home/gateway.js";
 import {
+  CancellationController,
+  type CancellationSignal,
+} from "./cancellation.js";
+import {
   createDht,
   dhtStreamSnapshot,
   keyPairFromSecretKey,
@@ -43,12 +47,14 @@ export interface StartSubscriberOptions {
   stateDir: string;
   bootstrap?: DhtAddress[];
   gatewayPort?: number;
+  serviceAcquisitionTimeoutMs?: number;
   services: SubscriberService[];
   log?: (line: string) => void;
   now?: () => number;
   observe?: Observe;
   route?: Route;
   sleep?: (delayMs: number) => Promise<void>;
+  waitForPublisher?: boolean;
 }
 
 export type SubscriberConnectionStatus =
@@ -78,8 +84,15 @@ export interface RunningSubscriber {
 }
 
 interface ServiceOpener {
-  open: (serviceId: string) => Promise<Duplex>;
+  open: (serviceId: string, signal?: CancellationSignal) => Promise<Duplex>;
 }
+
+type ScheduleConnectTimeout = (
+  delayMs: number,
+  onTimeout: () => void,
+) => () => void;
+
+const defaultConnectTimeoutMs = 20_000;
 
 export async function startSubscriber(
   options: StartSubscriberOptions,
@@ -105,22 +118,29 @@ export async function startSubscriber(
   let stopped = false;
 
   try {
-    await connection.start();
+    if (options.waitForPublisher ?? true) {
+      await connection.start();
+    }
 
     const gateway = await startHttpGateway({
       port: options.gatewayPort ?? (contact.requestedLocalPort || undefined),
+      acquisitionTimeoutMs: options.serviceAcquisitionTimeoutMs,
       open: connection.open,
     });
     servers.push(gateway.server);
     const services: RunningSubscriberService[] = [];
     for (const service of options.services) {
-      const listener = await listenService(
+      const listener = await listenSubscriberService(
         service.id,
         service.localPort,
         connection,
+        options.serviceAcquisitionTimeoutMs ?? 10_000,
       );
       servers.push(listener.server);
       services.push({ id: service.id, port: listener.port });
+    }
+    if (options.waitForPublisher === false) {
+      connection.startInBackground();
     }
 
     options.log?.(`Local HTTP gateway ready @${gateway.url}`);
@@ -146,8 +166,8 @@ export async function startSubscriber(
       async stop(): Promise<void> {
         if (stopped) return;
         stopped = true;
-        await Promise.allSettled(servers.map(closeServer));
         await connection.stop();
+        await Promise.allSettled(servers.map(closeServer));
         await dht.destroy({ force: true });
       },
     };
@@ -161,14 +181,20 @@ export async function startSubscriber(
   }
 }
 
-async function listenService(
+export async function listenSubscriberService(
   serviceId: string,
   port: number,
   connection: ServiceOpener,
+  acquisitionTimeoutMs: number,
 ): Promise<{ port: number; server: Server }> {
   const server = createServer({ allowHalfOpen: true }, (socket) => {
     socket.pause();
-    void openAndBridge(socket, connection, serviceId);
+    void openAndBridge(
+      socket,
+      connection,
+      serviceId,
+      acquisitionTimeoutMs,
+    );
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -189,9 +215,16 @@ async function openAndBridge(
   socket: Socket,
   connection: ServiceOpener,
   serviceId: string,
+  acquisitionTimeoutMs: number,
 ): Promise<void> {
+  const abort = new CancellationController();
+  const timeout = setTimeout(() => {
+    abort.abort();
+    socket.destroy();
+  }, acquisitionTimeoutMs);
+  socket.once("close", () => abort.abort());
   try {
-    const tunnel = await connection.open(serviceId);
+    const tunnel = await connection.open(serviceId, abort.signal);
     if (socket.destroyed) {
       tunnel.destroy();
       return;
@@ -205,19 +238,24 @@ async function openAndBridge(
     socket.resume();
   } catch {
     socket.destroy();
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
 export function createPublisherConnection(options: {
   connect: () => DhtStream;
+  connectTimeoutMs?: number;
   createMuxSubscriber?: typeof createMuxSubscriber;
   log?: (line: string) => void;
   now: () => number;
   observe?: Observe;
   route: Route;
+  scheduleConnectTimeout?: ScheduleConnectTimeout;
   sleep: (delayMs: number) => Promise<void>;
 }): ServiceOpener & {
   start: () => Promise<void>;
+  startInBackground: () => void;
   status: () => SubscriberConnectionStatus;
   stop: () => Promise<void>;
 } {
@@ -285,7 +323,11 @@ export function createPublisherConnection(options: {
       options.now,
     );
     try {
-      await waitForConnect(outer);
+      await waitForConnect(
+        outer,
+        options.connectTimeoutMs ?? defaultConnectTimeoutMs,
+        options.scheduleConnectTimeout ?? scheduleConnectTimeout,
+      );
       if (stopped) {
         outer.destroy();
         throw new Error("Subscriber stopped");
@@ -378,12 +420,19 @@ export function createPublisherConnection(options: {
     async start(): Promise<void> {
       await connectOnce();
     },
-    async open(serviceId: string): Promise<Duplex> {
+    startInBackground(): void {
+      if (stopped || current || reconnecting) return;
+      void reconnect().catch(() => undefined);
+    },
+    async open(serviceId: string, signal?: CancellationSignal): Promise<Duplex> {
       while (!stopped) {
+        throwIfAborted(signal);
         const activeConnection = current;
-        const active = activeConnection?.mux ?? (await reconnect());
+        const active = activeConnection?.mux ??
+          (await waitWithAbort(reconnect(), signal));
+        throwIfAborted(signal);
         try {
-          return await active.open(serviceId);
+          return await openWithAbort(active.open(serviceId), signal);
         } catch (error) {
           if (
             current?.mux === active &&
@@ -411,6 +460,49 @@ export function createPublisherConnection(options: {
       await reconnecting?.catch(() => undefined);
     },
   };
+}
+
+function throwIfAborted(signal?: CancellationSignal): void {
+  if (signal?.aborted) throw new Error("Service open aborted");
+}
+
+async function waitWithAbort<T>(
+  pending: Promise<T>,
+  signal?: CancellationSignal,
+): Promise<T> {
+  if (!signal) return pending;
+  throwIfAborted(signal);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(new Error("Service open aborted"));
+    };
+    signal.addEventListener("abort", onAbort);
+    pending.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function openWithAbort(
+  pending: Promise<Duplex>,
+  signal?: CancellationSignal,
+): Promise<Duplex> {
+  if (!signal) return pending;
+  try {
+    return await waitWithAbort(pending, signal);
+  } catch (error) {
+    if (signal.aborted) {
+      void pending.then((stream) => stream.destroy(), () => undefined);
+    }
+    throw error;
+  }
 }
 
 function observeHandshake(
@@ -442,14 +534,25 @@ async function delay(ms: number): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForConnect(stream: DhtStream): Promise<void> {
+async function waitForConnect(
+  stream: DhtStream,
+  timeoutMs: number,
+  scheduleTimeout: ScheduleConnectTimeout,
+): Promise<void> {
   if (stream.connected) return;
+  requirePositiveTimeout(timeoutMs);
   await new Promise<void>((resolve, reject) => {
+    let cancelTimeout = (): void => undefined;
     const cleanup = (): void => {
+      cancelTimeout();
       stream.off("connect", onConnect);
       stream.off("error", onError);
       stream.off("close", onClose);
     };
+    cancelTimeout = scheduleTimeout(timeoutMs, () => {
+      cleanup();
+      reject(new Error(`Publisher connection timed out after ${timeoutMs}ms`));
+    });
     const onConnect = (): void => {
       cleanup();
       resolve();
@@ -466,6 +569,20 @@ async function waitForConnect(stream: DhtStream): Promise<void> {
     stream.once("error", onError);
     stream.once("close", onClose);
   });
+}
+
+function scheduleConnectTimeout(
+  delayMs: number,
+  onTimeout: () => void,
+): () => void {
+  const timeout = setTimeout(onTimeout, delayMs);
+  return () => clearTimeout(timeout);
+}
+
+function requirePositiveTimeout(timeoutMs: number): void {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("connect timeout must be a positive finite number");
+  }
 }
 
 async function closeServer(server: Server): Promise<void> {

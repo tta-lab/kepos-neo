@@ -91,7 +91,11 @@ class KeposForegroundService : Service() {
     val state = runtime.snapshot().state
     if (state != RuntimeState.STOPPED && state != RuntimeState.FAILED) return
     try {
-      runtime.start(assets.open(WORKLET_ASSET))
+      val stateDir = filesDir.resolve("subscriber")
+      runtime.start(
+        assets.open(WORKLET_ASSET),
+        arguments = arrayOf(stateDir.absolutePath),
+      )
     } catch (error: Throwable) {
       Log.e(LOG_TAG, "Bare Worklet failed to start", error)
     }
@@ -139,6 +143,9 @@ class KeposForegroundService : Service() {
     fun snapshot(): RuntimeSnapshot = runtime.snapshot()
 
     fun ping(): CompletableFuture<RuntimeSnapshot> = runtime.ping()
+
+    fun configurePublisher(publisherKey: String): CompletableFuture<RuntimeSnapshot> =
+      runtime.configurePublisher(publisherKey)
 
     fun observe(listener: (RuntimeSnapshot) -> Unit): AutoCloseable {
       listeners += listener

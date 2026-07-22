@@ -13,6 +13,12 @@ data class RuntimeSnapshot(
   val runtimeId: String? = null,
   val echoUrl: String? = null,
   val error: String? = null,
+  val subscriberPublicKey: String? = null,
+  val configured: Boolean = false,
+  val connection: String? = null,
+  val homeUrl: String? = null,
+  val navidromeUrl: String? = null,
+  val navidromeFallbackUrl: String? = null,
 )
 
 data class StartDecision(val runtimeId: String, val shouldCreate: Boolean)
@@ -40,12 +46,31 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
   }
 
   @Synchronized
-  fun running(runtimeId: String, echoUrl: String) {
+  fun running(
+    runtimeId: String,
+    echoUrl: String,
+    subscriberPublicKey: String? = null,
+    configured: Boolean = false,
+    connection: String? = null,
+    homeUrl: String? = null,
+    navidromeUrl: String? = null,
+    navidromeFallbackUrl: String? = null,
+  ) {
     requireCurrent(runtimeId)
     check(current.state == RuntimeState.STARTING || current.state == RuntimeState.RUNNING) {
       "runtime cannot enter running from ${current.state}"
     }
-    current = RuntimeSnapshot(RuntimeState.RUNNING, runtimeId, echoUrl)
+    current = RuntimeSnapshot(
+      state = RuntimeState.RUNNING,
+      runtimeId = runtimeId,
+      echoUrl = echoUrl,
+      subscriberPublicKey = subscriberPublicKey,
+      configured = configured,
+      connection = connection,
+      homeUrl = homeUrl,
+      navidromeUrl = navidromeUrl,
+      navidromeFallbackUrl = navidromeFallbackUrl,
+    )
   }
 
   @Synchronized

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createConnection } from "node:net";
 import { Duplex, PassThrough } from "node:stream";
 import { test } from "node:test";
 
@@ -8,7 +9,10 @@ import {
   connectionOptionsForRoute,
   parseRoute,
 } from "../src/mux/route.js";
-import { createPublisherConnection } from "../src/runtime/subscriber.js";
+import {
+  createPublisherConnection,
+  listenSubscriberService,
+} from "../src/runtime/subscriber.js";
 
 class FakeDhtStream extends Duplex implements DhtStream {
   connected: boolean;
@@ -113,6 +117,83 @@ test("reconnect observations report failed attempt delay and total recovery", as
   await connection.stop();
 });
 
+test("a pending DHT attempt times out before the next retry", async () => {
+  const events: Observation[] = [];
+  const initial = new FakeDhtStream(true);
+  const pending = new FakeDhtStream(false);
+  const restored = new FakeDhtStream(true);
+  const candidates = [initial, pending, restored];
+  let timeout: (() => void) | undefined;
+  const connection = createPublisherConnection({
+    connect: () => {
+      const stream = candidates.shift();
+      if (!stream) throw new Error("unexpected connection attempt");
+      return stream;
+    },
+    connectTimeoutMs: 20_000,
+    scheduleConnectTimeout: (_delayMs, onTimeout) => {
+      timeout = onTimeout;
+      return () => {
+        timeout = undefined;
+      };
+    },
+    now: () => 1_000,
+    observe: (event) => events.push(event),
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  await connection.start();
+  initial.destroy();
+  await waitFor(() => timeout !== undefined, "timeout was not scheduled");
+  timeout?.();
+  await waitFor(
+    () => events.some(({ event }) => event === "outer.restored"),
+    "connection did not retry after timeout",
+  );
+
+  assert.equal(pending.destroyed, true);
+  assert.equal(
+    events.find(({ event }) => event === "outer.retry")?.error,
+    "Publisher connection timed out after 20000ms",
+  );
+  await connection.stop();
+});
+
+test("background start keeps retrying without blocking local listeners", async () => {
+  const pending = new FakeDhtStream(false);
+  const restored = new FakeDhtStream(true);
+  const candidates = [pending, restored];
+  let timeout: (() => void) | undefined;
+  const connection = createPublisherConnection({
+    connect: () => {
+      const stream = candidates.shift();
+      if (!stream) throw new Error("unexpected connection attempt");
+      return stream;
+    },
+    connectTimeoutMs: 20_000,
+    scheduleConnectTimeout: (_delayMs, onTimeout) => {
+      timeout = onTimeout;
+      return () => {
+        timeout = undefined;
+      };
+    },
+    now: () => 1_000,
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  connection.startInBackground();
+  assert.equal(connection.status(), "reconnecting");
+  await waitFor(() => timeout !== undefined, "timeout was not scheduled");
+  timeout?.();
+  await waitFor(
+    () => connection.status() === "connected",
+    "background connection did not restore",
+  );
+  await connection.stop();
+});
+
 test("service open yields before retrying a destroyed outer connection", async () => {
   const delays: number[] = [];
   const initial = new FakeDhtStream(true);
@@ -147,6 +228,79 @@ test("service open yields before retrying a destroyed outer connection", async (
 
   stream.destroy();
   await connection.stop();
+});
+
+test("aborting a service open rejects promptly and destroys a late tunnel", async () => {
+  const outer = new FakeDhtStream(true);
+  const lateTunnel = new PassThrough();
+  let resolveOpen: ((stream: PassThrough) => void) | undefined;
+  const connection = createPublisherConnection({
+    connect: () => outer,
+    createMuxSubscriber: () => ({
+      close: () => outer.destroy(),
+      open: async () =>
+        new Promise<PassThrough>((resolve) => {
+          resolveOpen = resolve;
+        }),
+    }),
+    now: () => 1_000,
+    route: "auto",
+    sleep: async () => undefined,
+  });
+  await connection.start();
+  const abort = new AbortController();
+  const opening = connection.open("ssh", abort.signal);
+  abort.abort();
+
+  await assert.rejects(
+    Promise.race([
+      opening,
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("abort timed out")), 100);
+      }),
+    ]),
+    /aborted/,
+  );
+  resolveOpen?.(lateTunnel);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lateTunnel.destroyed, true);
+  await connection.stop();
+});
+
+test("raw TCP closes when tunnel acquisition exceeds its deadline", async () => {
+  let aborted = false;
+  const listener = await listenSubscriberService(
+    "ssh",
+    0,
+    {
+      open: async (_serviceId, signal) => {
+        signal?.addEventListener("abort", () => {
+          aborted = true;
+        });
+        return new Promise<never>(() => undefined);
+      },
+    },
+    5,
+  );
+  const socket = createConnection({ host: "127.0.0.1", port: listener.port });
+
+  try {
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        socket.once("close", resolve);
+        socket.once("error", reject);
+      }),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("raw TCP close timed out")), 100);
+      }),
+    ]);
+    assert.equal(aborted, true);
+  } finally {
+    socket.destroy();
+    await new Promise<void>((resolve, reject) => {
+      listener.server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
 });
 
 test("stop aborts an initial connection that is still pending", async () => {

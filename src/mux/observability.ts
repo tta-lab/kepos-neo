@@ -109,7 +109,7 @@ export function createObservationEmitter(
 
 export function sanitizeObservation(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sanitizeObservation);
-  if (Buffer.isBuffer(value)) return value.toString("hex");
+  if (b4a.isBuffer(value)) return b4a.toString(value, "hex");
   if (value === null || typeof value !== "object") return value;
 
   const sanitized: ObservationFields = {};
@@ -121,9 +121,9 @@ export function sanitizeObservation(value: unknown): unknown {
     if (
       (normalizedKey === "publickey" ||
         normalizedKey === "remotepublickey") &&
-      (typeof field === "string" || Buffer.isBuffer(field))
+      (typeof field === "string" || b4a.isBuffer(field))
     ) {
-      const keyHex = Buffer.isBuffer(field) ? field.toString("hex") : field;
+      const keyHex = b4a.isBuffer(field) ? b4a.toString(field, "hex") : field;
       sanitized[key] = keyHex.slice(0, 16);
       continue;
     }
@@ -133,6 +133,7 @@ export function sanitizeObservation(value: unknown): unknown {
 }
 
 export function createObservationId(prefix: string): string {
-  return `${prefix}-${randomBytes(8).toString("hex")}`;
+  return `${prefix}-${b4a.toString(crypto.randomBytes(8), "hex")}`;
 }
-import { randomBytes } from "node:crypto";
+import b4a from "b4a";
+import crypto from "hypercore-crypto";
