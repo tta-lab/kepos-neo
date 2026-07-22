@@ -1,6 +1,6 @@
 # Mac to kosmos transport evidence
 
-Dates: 2026-07-17 and 2026-07-18
+Dates: 2026-07-17, 2026-07-18, and 2026-07-22
 
 The first section records the current persistent Protomux runtime. Later
 sections retain the earlier one-process-per-service Hypertele evidence for
@@ -174,6 +174,30 @@ all succeeded again through the original local ports. The firewall rule was
 verified absent. This sample proves recovery from a silent UDP path and stable
 local listeners. The focused transport tests separately force the heartbeat
 timeout itself; in a real HyperDHT stream, its own timeout can win the race.
+
+### Real Mac network switch
+
+The same Mac subscriber was then left running while the Mac moved from a
+`192.168.31.0/24` Wi-Fi network to a `192.168.1.0/24` Wi-Fi network. The
+subscriber process, state directory, identity, and localhost listeners were
+not restarted or replaced. Its prior outer closed and a new outer reached the
+same publisher through a public IPv4 endpoint. The publisher journal showed
+the prior outer closed before it accepted the replacement for the same
+subscriber public key, so the publisher did not retain two active sessions
+for that identity.
+
+After recovery, the original local ports still served all three paths:
+
+| Operation | Result | Time |
+| --- | --- | ---: |
+| Home | HTTP 200 | 39 ms |
+| Navidrome `/ping` | HTTP 200 | 31 ms |
+| OpenSSH command | success | 468 ms |
+
+This proves recovery across a real Mac interface and address change without
+restarting the subscriber or its local services. It does not prove migration
+of TCP streams that were already open when the network changed; callers may
+need to retry those streams over the restored outer.
 
 ### Migration provenance
 
