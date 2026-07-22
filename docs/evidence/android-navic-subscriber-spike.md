@@ -144,7 +144,21 @@ Stage B1 merge gate.
 No private key, Navidrome credential, auth cookie, or raw state file belongs in
 this document.
 
-The Wi-Fi/cellular sample ran with the device's existing Clash VPN enabled.
-Android logs showed Kepos UDP using its configured proxy, so this sample proves
-the foreground lifecycle, outer replacement, and loopback recovery, not a pure
-direct-P2P route. The proxy configuration was left unchanged.
+The first Wi-Fi/cellular sample ran with the device's existing Clash VPN
+enabled. Android logs showed Kepos UDP using its configured proxy, so that
+sample proves the foreground lifecycle, outer replacement, and loopback
+recovery, not a pure direct-P2P route.
+
+The sample was then repeated after the operator stopped Clash. Android had no
+Clash process, `tun0`, VPN route, or configured HTTP proxy in this path. On
+Wi-Fi, the publisher accepted a private-LAN outer directly from the Pixel and
+replaced the older proxy-backed outer. Disabling Wi-Fi closed that LAN outer;
+one second later the publisher accepted a new outer from the phone's public
+IPv4 path. The numeric Navidrome fallback returned HTTP 200 within 10 seconds.
+
+Re-enabling Wi-Fi created another private-LAN outer. Once its control channel
+was ready, the publisher emitted `outer.replaced` and closed the cellular
+outer. The app kept the same PID and subscriber public-key fingerprint, and
+Home, hostname-routed Navidrome, and the numeric fallback all returned HTTP
+200. A simultaneous Mac check also kept Home, Navidrome, and SSH working
+through its independent subscriber outer.
