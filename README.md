@@ -25,12 +25,29 @@ owns one Bare Worklet, and that Worklet runs the same HyperDHT/Protomux
 subscriber core as the CLI. It does not install a VPN, TUN interface, or system
 DNS service.
 
-Build the debug APK and run its physical-device lifecycle gate:
+Build or install the debug app:
 
 ```sh
 npm run android:assemble
+npm run android:install
+```
+
+`android:install` uses `adb install -r`: it installs Kepos Neo when absent and
+updates the existing app while preserving app-private state, including the
+subscriber identity. Set `ANDROID_SERIAL` when more than one device is
+connected. A signing mismatch fails closed; the command never uninstalls the
+existing app or clears its data.
+
+Run the physical-device lifecycle gate separately:
+
+```sh
 npm run android:device-check
 ```
+
+The gate targets the isolated package `io.github.ttalab.kepos.devicetest` on
+ports 18480 and 18481. Android Gradle Plugin cleanup may uninstall that test
+package after the run, but it cannot replace, reconfigure, or remove the
+installed `io.github.ttalab.kepos` app and its state.
 
 The app generates its subscriber identity in app-private storage. Add the
 displayed public key to the publisher allowlist, paste the publisher public key

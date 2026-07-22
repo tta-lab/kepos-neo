@@ -70,7 +70,7 @@ test("Android host boundaries are explicit extraction seams", async () => {
   );
   assert.equal(
     rootPackage.scripts?.["android:device-check"],
-    "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDebugAndroidTest",
+    "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDeviceTestAndroidTest",
   );
   assert.notEqual(protocolPackage, null, "missing pure host protocol package");
   assert.notEqual(workletPackage, null, "missing product Worklet package");
@@ -87,7 +87,8 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.match(foregroundService!, /private val runtime = BareRuntime/);
   assert.match(foregroundService!, /START_STICKY/);
   assert.match(foregroundService!, /filesDir\.resolve\("subscriber"\)/);
-  assert.match(foregroundService!, /arguments\s*=\s*arrayOf\(stateDir\.absolutePath\)/);
+  assert.match(foregroundService!, /BuildConfig\.GATEWAY_PORT/);
+  assert.match(foregroundService!, /BuildConfig\.NAVIDROME_PORT/);
   assert.doesNotMatch(`${subscriberRuntime}\n${gateway}`, /\bAbortController\b/);
   assert.doesNotMatch(workflow!, /uses: actions\/(?:checkout|setup-node)@v\d/);
   assert.ok(
@@ -98,6 +99,39 @@ test("Android host boundaries are explicit extraction seams", async () => {
     bareKitSession!.indexOf("worklet.start") < bareKitSession!.indexOf("IPC(worklet)"),
     "Bare Kit IPC must be created after the Worklet starts",
   );
+});
+
+test("Android device commands isolate tests and preserve installed state", async () => {
+  const rootPackage = JSON.parse(
+    (await readProjectFile("package.json"))!,
+  ) as { scripts?: Record<string, string> };
+  const appBuild = await readProjectFile("android/app/build.gradle.kts");
+  const foregroundService = await readProjectFile(
+    "android/app/src/main/java/io/github/ttalab/kepos/KeposForegroundService.kt",
+  );
+  const lifecycleTest = await readProjectFile(
+    "android/app/src/androidTest/java/io/github/ttalab/kepos/WorkletLifecycleTest.kt",
+  );
+  const worklet = await readProjectFile("src/android/worklet/main.ts");
+  const readme = await readProjectFile("README.md");
+
+  assert.equal(
+    rootPackage.scripts?.["android:install"],
+    "npm run android:assemble && adb install -r android/app/build/outputs/apk/debug/app-debug.apk",
+  );
+  assert.match(appBuild!, /create\("deviceTest"\)/);
+  assert.match(appBuild!, /applicationIdSuffix\s*=\s*"\.devicetest"/);
+  assert.match(appBuild!, /GATEWAY_PORT.*18480/);
+  assert.match(appBuild!, /NAVIDROME_PORT.*18481/);
+  assert.match(foregroundService!, /BuildConfig\.GATEWAY_PORT/);
+  assert.match(foregroundService!, /BuildConfig\.NAVIDROME_PORT/);
+  assert.match(lifecycleTest!, /BuildConfig\.GATEWAY_PORT/);
+  assert.match(lifecycleTest!, /BuildConfig\.NAVIDROME_PORT/);
+  assert.match(worklet!, /Bare\.argv\[2\]/);
+  assert.match(worklet!, /Bare\.argv\[3\]/);
+  assert.match(readme!, /npm run android:install/);
+  assert.match(readme!, /io\.github\.ttalab\.kepos\.devicetest/);
+  assert.match(readme!, /preserving app-private state/);
 });
 
 test("Android subscriber waits for startup and exposes both local HTTP URLs", async () => {

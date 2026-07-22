@@ -13,6 +13,8 @@ android {
     targetSdk = 35
     versionCode = 1
     versionName = "0.1.0"
+    buildConfigField("int", "GATEWAY_PORT", "17480")
+    buildConfigField("int", "NAVIDROME_PORT", "17481")
 
     ndk {
       abiFilters += "arm64-v8a"
@@ -20,6 +22,18 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
+
+  buildTypes {
+    create("deviceTest") {
+      initWith(getByName("debug"))
+      applicationIdSuffix = ".devicetest"
+      matchingFallbacks += listOf("debug")
+      buildConfigField("int", "GATEWAY_PORT", "18480")
+      buildConfigField("int", "NAVIDROME_PORT", "18481")
+    }
+  }
+
+  testBuildType = "deviceTest"
 
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -31,6 +45,7 @@ android {
   }
 
   buildFeatures {
+    buildConfig = true
     compose = true
   }
 

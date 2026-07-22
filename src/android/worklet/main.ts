@@ -10,8 +10,18 @@ const runtimeId = Bare.argv[0] ?? "runtime-unknown";
 const stateDir = Bare.argv[1];
 if (!stateDir) throw new Error("Android subscriber state directory is required");
 
-const gatewayPort = 17_480;
-const navidromePort = 17_481;
+const gatewayPort = Number(Bare.argv[2] ?? "17480");
+const navidromePort = Number(Bare.argv[3] ?? "17481");
+if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65_535) {
+  throw new Error("Android gateway port is invalid");
+}
+if (
+  !Number.isInteger(navidromePort) ||
+  navidromePort < 1 ||
+  navidromePort > 65_535
+) {
+  throw new Error("Android Navidrome port is invalid");
+}
 const homeUrl = `http://home.localhost:${gatewayPort}/`;
 const navidromeUrl = `http://navidrome.localhost:${gatewayPort}/`;
 const setup = await setupSubscriber({ stateDir });

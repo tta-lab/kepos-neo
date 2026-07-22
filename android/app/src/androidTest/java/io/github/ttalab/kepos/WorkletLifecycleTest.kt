@@ -47,13 +47,13 @@ class WorkletLifecycleTest {
     assertEquals(first.runtimeId, binder.ping().get(10, TimeUnit.SECONDS).runtimeId)
     assertNotNull(first.subscriberPublicKey)
     assertTrue(checkNotNull(first.subscriberPublicKey).matches(Regex("^[0-9a-f]{64}$")))
-    assertEquals("http://home.localhost:17480/", first.homeUrl)
-    assertEquals("http://navidrome.localhost:17480/", first.navidromeUrl)
-    assertEquals("http://127.0.0.1:17481/", first.navidromeFallbackUrl)
+    assertEquals("http://home.localhost:${BuildConfig.GATEWAY_PORT}/", first.homeUrl)
+    assertEquals("http://navidrome.localhost:${BuildConfig.GATEWAY_PORT}/", first.navidromeUrl)
+    assertEquals("http://127.0.0.1:${BuildConfig.NAVIDROME_PORT}/", first.navidromeFallbackUrl)
     val configured = binder.configurePublisher("ab".repeat(32)).get(10, TimeUnit.SECONDS)
     assertTrue(configured.configured)
-    assertLoopbackListener(17_480)
-    assertLoopbackListener(17_481)
+    assertLoopbackListener(BuildConfig.GATEWAY_PORT)
+    assertLoopbackListener(BuildConfig.NAVIDROME_PORT)
 
     ActivityScenario.launch(MainActivity::class.java).use { activity ->
       activity.recreate()

@@ -38,6 +38,12 @@ The same lifecycle is now a repeatable instrumentation gate:
 npm run android:device-check
 ```
 
+The gate now installs `io.github.ttalab.kepos.devicetest` and uses ports 18480
+and 18481. This isolation matters because Android Gradle Plugin removes its
+instrumentation target after a run by default. The test package and its fake
+publisher state cannot overwrite or remove the dogfood
+`io.github.ttalab.kepos` installation.
+
 `WorkletLifecycleTest` starts the foreground service, completes an IPC ping, checks the loopback response, recreates and then closes the Activity, repeats IPC and HTTP checks against the same runtime ID and URL, and verifies that explicit Stop closes the listener. It passed on the Pixel 7a above.
 
 Runtime failures are recoverable without recreating the service. Manual Start retries immediately from `failed`; unattended failures use one queued retry with delays of 1, 2, 4, 8, 16, then at most 30 seconds. Explicit Stop cancels a queued retry. JVM tests cover immediate manual recovery, the capped delay sequence, duplicate failure events, and cancellation.
