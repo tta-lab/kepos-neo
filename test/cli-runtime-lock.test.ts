@@ -47,6 +47,39 @@ test("recovers a runtime lock owned by a dead process", async () => {
   }
 });
 
+test("grants exactly one concurrent stale-lock claimant", async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), "kepos-cli-stale-race-"));
+  await writeFile(
+    subscriberRuntimeLockPath(stateDir),
+    `${JSON.stringify({ ownerToken: "stale", pid: 2_147_483_647 })}\n`,
+    { mode: 0o600 },
+  );
+
+  try {
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 32 }, () =>
+        acquireSubscriberRuntimeLock(stateDir),
+      ),
+    );
+    const acquired = attempts.filter(
+      (attempt): attempt is PromiseFulfilledResult<
+        Awaited<ReturnType<typeof acquireSubscriberRuntimeLock>>
+      > => attempt.status === "fulfilled",
+    );
+
+    assert.equal(acquired.length, 1);
+    for (const attempt of attempts) {
+      if (attempt.status === "rejected") {
+        assert.match(String(attempt.reason), /subscriber identity is already in use/i);
+      }
+    }
+    await acquired[0].value.release();
+  } finally {
+    await rm(subscriberRuntimeLockPath(stateDir), { force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("fails closed for malformed runtime lock state", async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), "kepos-cli-invalid-"));
   await writeFile(subscriberRuntimeLockPath(stateDir), "not-json\n", {

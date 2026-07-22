@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import {
+  link,
   mkdir,
   open,
   readFile,
@@ -42,17 +43,7 @@ export async function acquireSubscriberRuntimeLock(
         `Subscriber identity is already in use by process ${existing.pid}`,
       );
     }
-    await unlink(lockPath);
-    try {
-      await createLock(lockPath, state);
-    } catch (retryError) {
-      if (hasCode(retryError, "EEXIST")) {
-        throw new Error("Subscriber identity is already in use", {
-          cause: retryError,
-        });
-      }
-      throw retryError;
-    }
+    await replaceStaleLock(lockPath, existing, state);
   }
 
   let released = false;
@@ -67,6 +58,58 @@ export async function acquireSubscriberRuntimeLock(
       released = true;
     },
   };
+}
+
+async function replaceStaleLock(
+  lockPath: string,
+  existing: RuntimeLockState,
+  replacement: RuntimeLockState,
+): Promise<void> {
+  const claimId = crypto
+    .createHash("sha256")
+    .update(`${existing.ownerToken}:${existing.pid}`)
+    .digest("hex");
+  const claimPath = `${lockPath}.reclaim.${claimId}`;
+
+  try {
+    await link(lockPath, claimPath);
+  } catch (error) {
+    if (hasCode(error, "EEXIST") || hasCode(error, "ENOENT")) {
+      throw new Error("Subscriber identity is already in use", {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+
+  try {
+    const claimed = await readLock(claimPath);
+    const current = await readLock(lockPath);
+    if (!sameLockState(claimed, existing) || !sameLockState(current, existing)) {
+      throw new Error("Subscriber identity is already in use");
+    }
+
+    await unlink(lockPath);
+    try {
+      await createLock(lockPath, replacement);
+    } catch (error) {
+      if (hasCode(error, "EEXIST")) {
+        throw new Error("Subscriber identity is already in use", {
+          cause: error,
+        });
+      }
+      throw error;
+    }
+  } finally {
+    await unlink(claimPath).catch(() => undefined);
+  }
+}
+
+function sameLockState(
+  left: RuntimeLockState,
+  right: RuntimeLockState,
+): boolean {
+  return left.ownerToken === right.ownerToken && left.pid === right.pid;
 }
 
 async function createLock(
