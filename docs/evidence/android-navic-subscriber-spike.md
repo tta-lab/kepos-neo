@@ -61,6 +61,9 @@ reconnecting, the native service home read the live publisher Registry and
 showed the publisher display name plus Forgejo, Navidrome, SSH, and Woodpecker
 in publisher order. It hid Home, used the same portal mark as `kepos-web`, and
 showed `http://navidrome.localhost:17480/` as Navidrome's Copy URL action.
+The compact service directory keeps all four cards and their secondary text in
+the Pixel 7a's initial viewport without scrolling while retaining 48 dp action
+targets.
 Newsreader and IBM Plex Sans/Mono are bundled with their OFL license texts;
 service and action symbols use the pinned Compose Lucide package.
 

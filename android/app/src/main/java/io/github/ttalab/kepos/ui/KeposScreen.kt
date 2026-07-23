@@ -172,30 +172,36 @@ private fun ServiceHome(
       .fillMaxSize()
       .statusBarsPadding(),
     contentPadding = androidx.compose.foundation.layout.PaddingValues(
-      start = 24.dp,
-      end = 24.dp,
-      top = 20.dp,
-      bottom = 40.dp,
+      start = 20.dp,
+      end = 20.dp,
+      top = 14.dp,
+      bottom = 24.dp,
     ),
   ) {
     item {
       BrandBar(onSettings)
-      Spacer(Modifier.height(54.dp))
+      Spacer(Modifier.height(24.dp))
       PublisherNode(
         name = checkNotNull(model.publisherName),
         connection = model.connection,
       )
-      Spacer(Modifier.height(56.dp))
+      Spacer(Modifier.height(28.dp))
       Text(
         text = "Your services",
-        style = MaterialTheme.typography.headlineMedium,
+        style = MaterialTheme.typography.headlineMedium.copy(
+          fontSize = 28.sp,
+          lineHeight = 30.sp,
+        ),
       )
       Text(
         text = if (model.services.isEmpty()) "Nothing is published yet."
         else "One private connection. ${model.services.size} local endpoints.",
-        modifier = Modifier.padding(top = 8.dp, bottom = 22.dp),
+        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
         color = KeposPalette.Muted,
-        style = MaterialTheme.typography.bodyMedium,
+        style = MaterialTheme.typography.bodyMedium.copy(
+          fontSize = 13.sp,
+          lineHeight = 18.sp,
+        ),
       )
     }
     itemsIndexed(model.services, key = { _, service -> service.id }) { index, service ->
@@ -297,15 +303,15 @@ private fun PublisherNode(name: String, connection: String?) {
   Row(verticalAlignment = Alignment.CenterVertically) {
     Box(
       modifier = Modifier
-        .size(42.dp)
+        .size(36.dp)
         .background(KeposPalette.Lime, RoundedCornerShape(4.dp)),
       contentAlignment = Alignment.Center,
     ) {
-      Canvas(Modifier.size(13.dp)) {
+      Canvas(Modifier.size(11.dp)) {
         drawCircle(KeposPalette.Ink)
       }
     }
-    Spacer(Modifier.width(18.dp))
+    Spacer(Modifier.width(14.dp))
     Column {
       Text(
         text = statusLabel(connection).uppercase(),
@@ -314,8 +320,11 @@ private fun PublisherNode(name: String, connection: String?) {
       )
       Text(
         text = name,
-        modifier = Modifier.padding(top = 5.dp),
-        style = MaterialTheme.typography.displayLarge,
+        modifier = Modifier.padding(top = 2.dp),
+        style = MaterialTheme.typography.displayLarge.copy(
+          fontSize = 42.sp,
+          lineHeight = 42.sp,
+        ),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
@@ -338,8 +347,8 @@ private fun ServiceRailItem(
   Row(modifier = modifier.fillMaxWidth()) {
     Box(
       modifier = Modifier
-        .width(42.dp)
-        .height(154.dp),
+        .width(34.dp)
+        .height(118.dp),
       contentAlignment = Alignment.Center,
     ) {
       Canvas(Modifier.fillMaxSize()) {
@@ -377,14 +386,14 @@ private fun ServiceRailItem(
     Surface(
       modifier = Modifier
         .fillMaxWidth()
-        .height(138.dp)
-        .padding(bottom = 12.dp)
+        .height(112.dp)
+        .padding(bottom = 8.dp)
         .border(1.dp, KeposPalette.Line, RoundedCornerShape(5.dp)),
       shape = RoundedCornerShape(5.dp),
       color = KeposPalette.Panel,
     ) {
       Column(
-        modifier = Modifier.padding(horizontal = 18.dp, vertical = 15.dp),
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.SpaceBetween,
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -392,13 +401,16 @@ private fun ServiceRailItem(
             imageVector = serviceIcon(service.icon),
             contentDescription = null,
             tint = KeposPalette.Lime,
-            modifier = Modifier.size(21.dp),
+            modifier = Modifier.size(20.dp),
           )
-          Spacer(Modifier.width(11.dp))
+          Spacer(Modifier.width(9.dp))
           Text(
             text = service.name,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleLarge.copy(
+              fontSize = 18.sp,
+              lineHeight = 22.sp,
+            ),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
           )
@@ -443,7 +455,7 @@ private fun ServiceRailItem(
           text = service.url ?: "TCP service · desktop listener required",
           color = KeposPalette.Muted,
           fontFamily = KeposMono,
-          fontSize = 11.sp,
+          fontSize = 10.5.sp,
           maxLines = 2,
           overflow = TextOverflow.Ellipsis,
         )
