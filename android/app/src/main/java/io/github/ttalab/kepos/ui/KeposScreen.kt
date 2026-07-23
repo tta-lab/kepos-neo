@@ -65,6 +65,7 @@ import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.SquareTerminal
 import com.composables.icons.lucide.Unplug
 import io.github.ttalab.barekit.host.RuntimeSnapshot
+import io.github.ttalab.barekit.host.RuntimeState
 
 @Composable
 fun KeposScreen(
@@ -702,7 +703,9 @@ private fun SettingsScreen(
             onCopyText(publisher.publisherKey)
           }
         } ?: SettingValue("Status", "Not verified yet")
-        SettingsAction("Change publisher", Lucide.RefreshCw, onClick = onChangePublisher)
+        if (snapshot.state == RuntimeState.RUNNING) {
+          SettingsAction("Change publisher", Lucide.RefreshCw, onClick = onChangePublisher)
+        }
       }
       Spacer(Modifier.height(30.dp))
       SettingsSection("Diagnostics") {

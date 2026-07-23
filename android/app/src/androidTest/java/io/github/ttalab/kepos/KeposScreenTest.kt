@@ -94,6 +94,7 @@ class KeposScreenTest {
     compose.onNodeWithText("Diagnostics").performClick()
     compose.onNodeWithText("DIAGNOSTICS").assertIsDisplayed()
     compose.onNodeWithText("failed").assertIsDisplayed()
+    compose.onAllNodesWithText("Change publisher").assertCountEquals(0)
   }
 
   @Test
