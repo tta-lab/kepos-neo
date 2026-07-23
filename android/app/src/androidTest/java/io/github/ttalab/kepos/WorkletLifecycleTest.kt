@@ -1,5 +1,6 @@
 package io.github.ttalab.kepos
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -8,6 +9,7 @@ import android.os.IBinder
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 import java.net.InetSocketAddress
@@ -29,6 +31,10 @@ class WorkletLifecycleTest {
 
   @Before
   fun startCleanService() {
+    InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(
+      context.packageName,
+      Manifest.permission.POST_NOTIFICATIONS,
+    )
     context.stopService(Intent(context, KeposForegroundService::class.java))
     KeposForegroundService.start(context)
     connection = TestServiceConnection(context)
@@ -47,9 +53,7 @@ class WorkletLifecycleTest {
     assertEquals(first.runtimeId, binder.ping().get(10, TimeUnit.SECONDS).runtimeId)
     assertNotNull(first.subscriberPublicKey)
     assertTrue(checkNotNull(first.subscriberPublicKey).matches(Regex("^[0-9a-f]{64}$")))
-    assertEquals("http://home.localhost:${BuildConfig.GATEWAY_PORT}/", first.homeUrl)
-    assertEquals("http://navidrome.localhost:${BuildConfig.GATEWAY_PORT}/", first.navidromeUrl)
-    assertEquals("http://127.0.0.1:${BuildConfig.NAVIDROME_PORT}/", first.navidromeFallbackUrl)
+    assertEquals("http://navidrome.localhost:${BuildConfig.GATEWAY_PORT}/", first.echoUrl)
     val configured = binder.configurePublisher("ab".repeat(32)).get(10, TimeUnit.SECONDS)
     assertTrue(configured.configured)
     assertLoopbackListener(BuildConfig.GATEWAY_PORT)
@@ -60,8 +64,8 @@ class WorkletLifecycleTest {
       val afterRecreate = binder.awaitState(RuntimeState.RUNNING)
       assertEquals(first.runtimeId, afterRecreate.runtimeId)
       assertEquals(first.subscriberPublicKey, afterRecreate.subscriberPublicKey)
-      assertEquals(first.homeUrl, afterRecreate.homeUrl)
-      assertEquals(first.navidromeUrl, afterRecreate.navidromeUrl)
+      assertEquals(configured.configured, afterRecreate.configured)
+      assertEquals(first.echoUrl, afterRecreate.echoUrl)
     }
 
     val afterActivityClosed = binder.awaitState(RuntimeState.RUNNING)

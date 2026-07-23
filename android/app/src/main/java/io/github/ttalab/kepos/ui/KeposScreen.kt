@@ -1,28 +1,70 @@
 package io.github.ttalab.kepos.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.AudioLines
+import com.composables.icons.lucide.Box as BoxIcon
+import com.composables.icons.lucide.Copy
+import com.composables.icons.lucide.ExternalLink
+import com.composables.icons.lucide.GitBranch
+import com.composables.icons.lucide.Hammer
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.SquareTerminal
+import com.composables.icons.lucide.Unplug
 import io.github.ttalab.barekit.host.RuntimeSnapshot
-import io.github.ttalab.barekit.host.RuntimeState
 
 @Composable
 fun KeposScreen(
@@ -30,71 +72,697 @@ fun KeposScreen(
   onStart: () -> Unit,
   onStop: () -> Unit,
   onConfigure: (String) -> Unit,
+  onCopyText: (String) -> Unit,
+  onOpenUrl: (String) -> Unit,
 ) {
-  var publisherKey by rememberSaveable { mutableStateOf("") }
-  val clipboard = LocalClipboardManager.current
-  MaterialTheme {
-    Surface(modifier = Modifier.fillMaxSize()) {
-      Column(
-        modifier = Modifier.padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-      ) {
-        Text(text = "Kepos")
-        Text(text = snapshot.state.name.lowercase())
-        snapshot.connection?.let { Text(text = "Connection: $it") }
-        snapshot.subscriberPublicKey?.let { key ->
-          Text(text = "Subscriber: $key")
-          Button(onClick = { clipboard.setText(AnnotatedString(key)) }) {
-            Text(text = "Copy subscriber key")
-          }
-        }
-        OutlinedTextField(
-          value = publisherKey,
-          onValueChange = { value ->
-            publisherKey = value
-              .lowercase()
-              .filter { character -> character.isDigit() || character in 'a'..'f' }
-              .take(PUBLISHER_KEY_LENGTH)
+  val model = KeposUiModel.from(snapshot)
+  var showSettings by rememberSaveable { mutableStateOf(false) }
+  var changingPublisher by rememberSaveable { mutableStateOf(false) }
+  var confirmChange by rememberSaveable { mutableStateOf(false) }
+
+  KeposTheme {
+    Surface(
+      modifier = Modifier.fillMaxSize(),
+      color = KeposPalette.Ink,
+    ) {
+      when {
+        changingPublisher -> SetupScreen(
+          title = "Change publisher",
+          subtitle = "Enter the public key for the publisher this phone should trust.",
+          onBack = { changingPublisher = false },
+          onConfigure = { key ->
+            changingPublisher = false
+            onConfigure(key)
           },
-          label = { Text(text = "Publisher public key") },
-          keyboardOptions = KeyboardOptions(
-            autoCorrectEnabled = false,
-            keyboardType = KeyboardType.Ascii,
-          ),
-          singleLine = true,
         )
-        Button(
-          onClick = { onConfigure(publisherKey) },
-          enabled = snapshot.state == RuntimeState.RUNNING &&
-            PUBLISHER_KEY.matches(publisherKey),
-        ) {
-          Text(text = "Connect")
+        showSettings -> SettingsScreen(
+          snapshot = snapshot,
+          onBack = { showSettings = false },
+          onChangePublisher = { confirmChange = true },
+          onCopyText = onCopyText,
+          onStop = onStop,
+        )
+        model.destination == KeposDestination.SETUP -> SetupScreen(
+          title = "Bring your services here.",
+          subtitle = "Connect this phone to one trusted Kepos publisher.",
+          onConfigure = onConfigure,
+        )
+        model.destination == KeposDestination.SERVICES -> ServiceHome(
+          model = model,
+          onCopyText = onCopyText,
+          onOpenUrl = onOpenUrl,
+          onSettings = { showSettings = true },
+        )
+        model.destination == KeposDestination.FAILED -> ConnectionScreen(
+          title = "Kepos stopped",
+          detail = model.error ?: "The subscriber could not keep running.",
+          action = "Retry",
+          onAction = onStart,
+          secondaryAction = "Diagnostics",
+          onSecondaryAction = { showSettings = true },
+        )
+        model.destination == KeposDestination.STOPPED -> ConnectionScreen(
+          title = "Kepos is off",
+          detail = "Start the subscriber to reach your private services.",
+          action = "Start",
+          onAction = onStart,
+        )
+        else -> ConnectionScreen(
+          title = "Finding your publisher",
+          detail = connectionDetail(model.connection),
+          action = null,
+          onAction = onStart,
+        )
+      }
+    }
+
+    if (confirmChange) {
+      AlertDialog(
+        onDismissRequest = { confirmChange = false },
+        title = { Text("Change publisher?") },
+        text = {
+          Text("This phone will stop using the current publisher after the new key is saved.")
+        },
+        confirmButton = {
+          TextButton(onClick = {
+            confirmChange = false
+            showSettings = false
+            changingPublisher = true
+          }) { Text("Continue") }
+        },
+        dismissButton = {
+          TextButton(onClick = { confirmChange = false }) { Text("Cancel") }
+        },
+      )
+    }
+  }
+}
+
+@Composable
+private fun ServiceHome(
+  model: KeposUiModel,
+  onCopyText: (String) -> Unit,
+  onOpenUrl: (String) -> Unit,
+  onSettings: () -> Unit,
+) {
+  var infoService by rememberSaveable { mutableStateOf<String?>(null) }
+  val contentAlpha = if (model.available) 1f else 0.42f
+  LazyColumn(
+    modifier = Modifier
+      .fillMaxSize()
+      .statusBarsPadding(),
+    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+      start = 24.dp,
+      end = 24.dp,
+      top = 20.dp,
+      bottom = 40.dp,
+    ),
+  ) {
+    item {
+      BrandBar(onSettings)
+      Spacer(Modifier.height(54.dp))
+      PublisherNode(
+        name = checkNotNull(model.publisherName),
+        connection = model.connection,
+      )
+      Spacer(Modifier.height(56.dp))
+      Text(
+        text = "Your services",
+        style = MaterialTheme.typography.headlineMedium,
+      )
+      Text(
+        text = if (model.services.isEmpty()) "Nothing is published yet."
+        else "One private connection. ${model.services.size} local endpoints.",
+        modifier = Modifier.padding(top = 8.dp, bottom = 22.dp),
+        color = KeposPalette.Muted,
+        style = MaterialTheme.typography.bodyMedium,
+      )
+    }
+    itemsIndexed(model.services, key = { _, service -> service.id }) { index, service ->
+      ServiceRailItem(
+        service = service,
+        available = model.available,
+        first = index == 0,
+        last = index == model.services.lastIndex,
+        modifier = Modifier.alpha(contentAlpha),
+        onAction = {
+          when (service.action) {
+            ServiceAction.OPEN -> service.url?.let(onOpenUrl)
+            ServiceAction.COPY_URL,
+            ServiceAction.COPY_ADDRESS,
+            -> service.url?.let(onCopyText)
+            ServiceAction.INFO -> infoService = service.id
+          }
+        },
+        onCopyAddress = { service.url?.let(onCopyText) },
+        onViewDetails = { infoService = service.id },
+      )
+    }
+  }
+
+  model.services.firstOrNull { it.id == infoService }?.let { service ->
+    AlertDialog(
+      onDismissRequest = { infoService = null },
+      title = { Text(service.name) },
+      text = {
+        Text(
+          service.url
+            ?: "This TCP service does not have an Android listener yet. Use the Kepos CLI on a desktop.",
+        )
+      },
+      confirmButton = {
+        TextButton(onClick = { infoService = null }) { Text("Done") }
+      },
+    )
+  }
+}
+
+@Composable
+private fun BrandBar(onSettings: () -> Unit) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    PortalMark()
+    Spacer(Modifier.width(12.dp))
+    Text(
+      text = "KEPOS",
+      color = KeposPalette.Cream,
+      fontFamily = KeposMono,
+      fontWeight = FontWeight.SemiBold,
+      fontSize = 15.sp,
+      letterSpacing = 3.2.sp,
+    )
+    Spacer(Modifier.weight(1f))
+    IconButton(onClick = onSettings) {
+      Icon(
+        imageVector = Lucide.Settings,
+        contentDescription = "Settings",
+        tint = KeposPalette.Muted,
+      )
+    }
+  }
+}
+
+@Composable
+private fun PortalMark() {
+  Canvas(Modifier.size(width = 34.dp, height = 24.dp)) {
+    val stroke = 2.dp.toPx()
+    val scaleX = size.width / 40f
+    val scaleY = size.height / 28f
+    val portal = Path().apply {
+      moveTo(15f * scaleX, 3f * scaleY)
+      lineTo(4f * scaleX, 3f * scaleY)
+      lineTo(4f * scaleX, 25f * scaleY)
+      lineTo(15f * scaleX, 25f * scaleY)
+
+      moveTo(25f * scaleX, 3f * scaleY)
+      lineTo(36f * scaleX, 3f * scaleY)
+      lineTo(36f * scaleX, 25f * scaleY)
+      lineTo(25f * scaleX, 25f * scaleY)
+
+      moveTo(10f * scaleX, 14f * scaleY)
+      lineTo(30f * scaleX, 14f * scaleY)
+    }
+    drawPath(
+      path = portal,
+      color = KeposPalette.Lime,
+      style = Stroke(width = stroke, cap = StrokeCap.Square),
+    )
+  }
+}
+
+@Composable
+private fun PublisherNode(name: String, connection: String?) {
+  Row(verticalAlignment = Alignment.CenterVertically) {
+    Box(
+      modifier = Modifier
+        .size(42.dp)
+        .background(KeposPalette.Lime, RoundedCornerShape(4.dp)),
+      contentAlignment = Alignment.Center,
+    ) {
+      Canvas(Modifier.size(13.dp)) {
+        drawCircle(KeposPalette.Ink)
+      }
+    }
+    Spacer(Modifier.width(18.dp))
+    Column {
+      Text(
+        text = statusLabel(connection).uppercase(),
+        color = if (connection == "connected") KeposPalette.Lime else KeposPalette.Muted,
+        style = MaterialTheme.typography.labelMedium,
+      )
+      Text(
+        text = name,
+        modifier = Modifier.padding(top = 5.dp),
+        style = MaterialTheme.typography.displayLarge,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+  }
+}
+
+@Composable
+private fun ServiceRailItem(
+  service: ServiceUiModel,
+  available: Boolean,
+  first: Boolean,
+  last: Boolean,
+  modifier: Modifier = Modifier,
+  onAction: () -> Unit,
+  onCopyAddress: () -> Unit,
+  onViewDetails: () -> Unit,
+) {
+  var menuExpanded by rememberSaveable { mutableStateOf(false) }
+  Row(modifier = modifier.fillMaxWidth()) {
+    Box(
+      modifier = Modifier
+        .width(42.dp)
+        .height(154.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      Canvas(Modifier.fillMaxSize()) {
+        val x = size.width / 2
+        val center = size.height / 2
+        if (!first) {
+          drawLine(
+            KeposPalette.Line,
+            Offset(x, 0f),
+            Offset(x, center),
+            strokeWidth = 1.dp.toPx(),
+          )
         }
-        snapshot.homeUrl?.let { url ->
-          Text(text = url)
-          Button(onClick = { clipboard.setText(AnnotatedString(url)) }) {
-            Text(text = "Copy Home URL")
+        if (!last) {
+          drawLine(
+            KeposPalette.Line,
+            Offset(x, center),
+            Offset(x, size.height),
+            strokeWidth = 1.dp.toPx(),
+          )
+        }
+        drawLine(
+          KeposPalette.Line,
+          Offset(x, center),
+          Offset(size.width, center),
+          strokeWidth = 1.dp.toPx(),
+        )
+        drawCircle(
+          color = if (available) KeposPalette.Lime else KeposPalette.Muted,
+          radius = 4.dp.toPx(),
+          center = Offset(x, center),
+        )
+      }
+    }
+    Surface(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(138.dp)
+        .padding(bottom = 12.dp)
+        .border(1.dp, KeposPalette.Line, RoundedCornerShape(5.dp)),
+      shape = RoundedCornerShape(5.dp),
+      color = KeposPalette.Panel,
+    ) {
+      Column(
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 15.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = serviceIcon(service.icon),
+            contentDescription = null,
+            tint = KeposPalette.Lime,
+            modifier = Modifier.size(21.dp),
+          )
+          Spacer(Modifier.width(11.dp))
+          Text(
+            text = service.name,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+          ServiceActionButton(service, available, onAction)
+          Box {
+            IconButton(
+              onClick = { menuExpanded = true },
+              enabled = available,
+            ) {
+              Icon(
+                Lucide.EllipsisVertical,
+                contentDescription = "More actions for ${service.name}",
+                modifier = Modifier.size(18.dp),
+              )
+            }
+            DropdownMenu(
+              expanded = menuExpanded,
+              onDismissRequest = { menuExpanded = false },
+            ) {
+              if (service.url != null) {
+                DropdownMenuItem(
+                  text = { Text("Copy address") },
+                  onClick = {
+                    menuExpanded = false
+                    onCopyAddress()
+                  },
+                  leadingIcon = { Icon(Lucide.Copy, contentDescription = null) },
+                )
+              }
+              DropdownMenuItem(
+                text = { Text("View details") },
+                onClick = {
+                  menuExpanded = false
+                  onViewDetails()
+                },
+                leadingIcon = { Icon(Lucide.Settings, contentDescription = null) },
+              )
+            }
           }
         }
-        snapshot.navidromeUrl?.let { url ->
-          Text(text = url)
-          Button(onClick = { clipboard.setText(AnnotatedString(url)) }) {
-            Text(text = "Copy Navidrome URL")
-          }
-        }
-        snapshot.error?.let { Text(text = it, color = MaterialTheme.colorScheme.error) }
-        if (snapshot.state == RuntimeState.STOPPED || snapshot.state == RuntimeState.FAILED) {
-          Button(onClick = onStart) { Text(text = "Start") }
-        } else {
-          Button(onClick = onStop, enabled = snapshot.state != RuntimeState.STOPPING) {
-            Text(text = "Stop")
-          }
-        }
+        Text(
+          text = service.url ?: "TCP service · desktop listener required",
+          color = KeposPalette.Muted,
+          fontFamily = KeposMono,
+          fontSize = 11.sp,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+        )
       }
     }
   }
 }
+
+@Composable
+private fun ServiceActionButton(
+  service: ServiceUiModel,
+  available: Boolean,
+  onAction: () -> Unit,
+) {
+  val label = when (service.action) {
+    ServiceAction.OPEN -> "Open"
+    ServiceAction.COPY_URL -> "Copy URL"
+    ServiceAction.COPY_ADDRESS -> "Copy"
+    ServiceAction.INFO -> "Details"
+  }
+  val icon = when (service.action) {
+    ServiceAction.OPEN -> Lucide.ExternalLink
+    ServiceAction.COPY_URL,
+    ServiceAction.COPY_ADDRESS,
+    -> Lucide.Copy
+    ServiceAction.INFO -> Lucide.Unplug
+  }
+  OutlinedButton(
+    onClick = onAction,
+    enabled = available,
+    shape = RoundedCornerShape(4.dp),
+    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+      horizontal = 11.dp,
+      vertical = 7.dp,
+    ),
+  ) {
+    Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp))
+    Spacer(Modifier.width(7.dp))
+    Text(label, maxLines = 1)
+  }
+}
+
+@Composable
+private fun SetupScreen(
+  title: String,
+  subtitle: String,
+  onConfigure: (String) -> Unit,
+  onBack: (() -> Unit)? = null,
+) {
+  var publisherKey by rememberSaveable { mutableStateOf("") }
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .statusBarsPadding()
+      .padding(horizontal = 28.dp, vertical = 20.dp),
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      if (onBack != null) {
+        IconButton(onClick = onBack) {
+          Icon(Lucide.ArrowLeft, contentDescription = "Back")
+        }
+      } else {
+        PortalMark()
+      }
+      Spacer(Modifier.width(12.dp))
+      Text(
+        "KEPOS",
+        fontFamily = KeposMono,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 3.2.sp,
+      )
+    }
+    Spacer(Modifier.height(86.dp))
+    Text(title, style = MaterialTheme.typography.displayLarge)
+    Text(
+      subtitle,
+      modifier = Modifier.padding(top = 18.dp),
+      color = KeposPalette.Muted,
+      style = MaterialTheme.typography.bodyLarge,
+    )
+    Spacer(Modifier.height(54.dp))
+    Text(
+      "PUBLISHER PUBLIC KEY",
+      color = KeposPalette.Lime,
+      style = MaterialTheme.typography.labelMedium,
+    )
+    OutlinedTextField(
+      value = publisherKey,
+      onValueChange = { value ->
+        publisherKey = value
+          .lowercase()
+          .filter { character -> character.isDigit() || character in 'a'..'f' }
+          .take(PUBLISHER_KEY_LENGTH)
+      },
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 12.dp),
+      placeholder = { Text("64-character key") },
+      textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = KeposMono),
+      keyboardOptions = KeyboardOptions(
+        autoCorrectEnabled = false,
+        keyboardType = KeyboardType.Ascii,
+      ),
+      singleLine = true,
+    )
+    Button(
+      onClick = { onConfigure(publisherKey) },
+      enabled = PUBLISHER_KEY.matches(publisherKey),
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 18.dp)
+        .height(54.dp),
+      shape = RoundedCornerShape(4.dp),
+      colors = ButtonDefaults.buttonColors(
+        containerColor = KeposPalette.Lime,
+        contentColor = KeposPalette.Ink,
+      ),
+    ) {
+      Text("Connect")
+    }
+    Spacer(Modifier.weight(1f))
+    Text(
+      "One publisher. No account. No virtual subnet.",
+      color = KeposPalette.Muted,
+      style = MaterialTheme.typography.labelMedium,
+    )
+  }
+}
+
+@Composable
+private fun ConnectionScreen(
+  title: String,
+  detail: String,
+  action: String?,
+  onAction: () -> Unit,
+  secondaryAction: String? = null,
+  onSecondaryAction: () -> Unit = {},
+) {
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .statusBarsPadding()
+      .padding(28.dp),
+    verticalArrangement = Arrangement.Center,
+  ) {
+    PortalMark()
+    Spacer(Modifier.height(42.dp))
+    CircularProgressIndicator(
+      modifier = Modifier.size(26.dp),
+      color = KeposPalette.Lime,
+      strokeWidth = 2.dp,
+    )
+    Spacer(Modifier.height(30.dp))
+    Text(title, style = MaterialTheme.typography.headlineLarge)
+    Text(
+      detail,
+      modifier = Modifier.padding(top = 14.dp),
+      color = KeposPalette.Muted,
+      style = MaterialTheme.typography.bodyLarge,
+    )
+    if (action != null) {
+      Button(
+        onClick = onAction,
+        modifier = Modifier.padding(top = 28.dp),
+        shape = RoundedCornerShape(4.dp),
+      ) {
+        Icon(Lucide.RefreshCw, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(action)
+      }
+    }
+    if (secondaryAction != null) {
+      OutlinedButton(
+        onClick = onSecondaryAction,
+        modifier = Modifier.padding(top = 12.dp),
+        shape = RoundedCornerShape(4.dp),
+      ) {
+        Icon(Lucide.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(secondaryAction)
+      }
+    }
+  }
+}
+
+@Composable
+private fun SettingsScreen(
+  snapshot: RuntimeSnapshot,
+  onBack: () -> Unit,
+  onChangePublisher: () -> Unit,
+  onCopyText: (String) -> Unit,
+  onStop: () -> Unit,
+) {
+  LazyColumn(
+    modifier = Modifier
+      .fillMaxSize()
+      .statusBarsPadding(),
+    contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
+  ) {
+    item {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onBack) {
+          Icon(Lucide.ArrowLeft, contentDescription = "Back")
+        }
+        Spacer(Modifier.width(8.dp))
+        Text("Settings", style = MaterialTheme.typography.headlineLarge)
+      }
+      Spacer(Modifier.height(44.dp))
+      snapshot.publisher?.let { publisher ->
+        SettingsSection("Publisher") {
+          SettingValue("Name", publisher.displayName)
+          SettingValue("Key", fingerprint(publisher.publisherKey), mono = true)
+          SettingsAction("Copy publisher key", Lucide.Copy) {
+            onCopyText(publisher.publisherKey)
+          }
+          SettingsAction("Change publisher", Lucide.RefreshCw, onClick = onChangePublisher)
+        }
+        Spacer(Modifier.height(30.dp))
+      }
+      SettingsSection("Diagnostics") {
+        SettingValue("Runtime", snapshot.state.name.lowercase())
+        SettingValue("Connection", snapshot.connection ?: "unknown")
+        snapshot.subscriberPublicKey?.let { key ->
+          SettingValue("Subscriber", fingerprint(key), mono = true)
+          SettingsAction("Copy subscriber key", Lucide.Copy) { onCopyText(key) }
+        }
+      }
+      Spacer(Modifier.height(30.dp))
+      SettingsSection("Runtime") {
+        SettingsAction(
+          "Stop service",
+          Lucide.Unplug,
+          destructive = true,
+          onClick = onStop,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun SettingsSection(title: String, content: @Composable () -> Unit) {
+  Text(
+    title.uppercase(),
+    color = KeposPalette.Lime,
+    style = MaterialTheme.typography.labelMedium,
+  )
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(top = 12.dp)
+      .border(1.dp, KeposPalette.Line, RoundedCornerShape(5.dp))
+      .background(KeposPalette.Panel, RoundedCornerShape(5.dp))
+      .padding(18.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+  ) {
+    content()
+  }
+}
+
+@Composable
+private fun SettingValue(label: String, value: String, mono: Boolean = false) {
+  Column {
+    Text(label, color = KeposPalette.Muted, style = MaterialTheme.typography.bodyMedium)
+    Text(
+      value,
+      modifier = Modifier.padding(top = 3.dp),
+      fontFamily = if (mono) KeposMono else KeposBody,
+      color = KeposPalette.Cream,
+      fontSize = 15.sp,
+    )
+  }
+}
+
+@Composable
+private fun SettingsAction(
+  label: String,
+  icon: ImageVector,
+  destructive: Boolean = false,
+  onClick: () -> Unit,
+) {
+  OutlinedButton(
+    onClick = onClick,
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(4.dp),
+    colors = ButtonDefaults.outlinedButtonColors(
+      contentColor = if (destructive) KeposPalette.Error else KeposPalette.Cream,
+    ),
+  ) {
+    Icon(icon, contentDescription = null, modifier = Modifier.size(17.dp))
+    Spacer(Modifier.width(9.dp))
+    Text(label)
+  }
+}
+
+private fun serviceIcon(icon: ServiceIcon): ImageVector = when (icon) {
+  ServiceIcon.MUSIC -> Lucide.AudioLines
+  ServiceIcon.TERMINAL -> Lucide.SquareTerminal
+  ServiceIcon.GIT -> Lucide.GitBranch
+  ServiceIcon.BUILD -> Lucide.Hammer
+  ServiceIcon.WEB -> Lucide.ExternalLink
+  ServiceIcon.PORT -> Lucide.BoxIcon
+}
+
+private fun statusLabel(connection: String?): String = when (connection) {
+  "connected" -> "Connected directly"
+  "reconnecting" -> "Reconnecting…"
+  "connecting" -> "Connecting…"
+  else -> "Offline"
+}
+
+private fun connectionDetail(connection: String?): String = when (connection) {
+  "reconnecting" -> "The previous path closed. Kepos is opening a new one."
+  "offline" -> "The publisher is not reachable yet. Kepos will keep trying."
+  else -> "Kepos is discovering and authenticating the publisher."
+}
+
+private fun fingerprint(key: String): String = if (key.length <= 16) key
+else "${key.take(8)}…${key.takeLast(8)}"
 
 private const val PUBLISHER_KEY_LENGTH = 64
 private val PUBLISHER_KEY = Regex("^[0-9a-f]{$PUBLISHER_KEY_LENGTH}$")

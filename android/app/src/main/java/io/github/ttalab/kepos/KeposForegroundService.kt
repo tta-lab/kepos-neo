@@ -134,7 +134,7 @@ class KeposForegroundService : Service() {
       PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
     return Notification.Builder(this, NOTIFICATION_CHANNEL)
-      .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+      .setSmallIcon(R.drawable.ic_kepos_notification)
       .setContentTitle(getString(R.string.runtime_notification_title))
       .setContentText(snapshot.state.name.lowercase())
       .setContentIntent(openApp)

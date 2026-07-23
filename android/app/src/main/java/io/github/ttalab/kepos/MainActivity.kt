@@ -1,16 +1,22 @@
 package io.github.ttalab.kepos
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +52,10 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    enableEdgeToEdge(
+      statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+      navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+    )
     setContent {
       KeposScreen(
         snapshot = snapshot,
@@ -53,6 +63,10 @@ class MainActivity : ComponentActivity() {
         onStop = { KeposForegroundService.stop(this) },
         onConfigure = { publisherKey ->
           service?.configurePublisher(publisherKey)
+        },
+        onCopyText = { text -> copyText(text) },
+        onOpenUrl = { url ->
+          startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         },
       )
     }
@@ -65,6 +79,7 @@ class MainActivity : ComponentActivity() {
       connection,
       Context.BIND_AUTO_CREATE,
     )
+    startRuntime()
   }
 
   override fun onStop() {
@@ -85,5 +100,11 @@ class MainActivity : ComponentActivity() {
       return
     }
     KeposForegroundService.start(this)
+  }
+
+  private fun copyText(text: String) {
+    getSystemService(ClipboardManager::class.java).setPrimaryClip(
+      ClipData.newPlainText("Kepos service address", text),
+    )
   }
 }

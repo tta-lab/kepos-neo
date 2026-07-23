@@ -1,4 +1,9 @@
 import { WorkletController } from "@tta-lab/kepos-android-worklet/controller";
+import { readHomeRegistry } from "../registry-client.js";
+import {
+  AndroidRegistryState,
+  createAndroidRegistrySnapshot,
+} from "../services.js";
 import type { RunningSubscriber } from "../../runtime/subscriber.js";
 import { startSubscriber } from "../../runtime/subscriber.js";
 import {
@@ -22,22 +27,46 @@ if (
 ) {
   throw new Error("Android Navidrome port is invalid");
 }
-const homeUrl = `http://home.localhost:${gatewayPort}/`;
 const navidromeUrl = `http://navidrome.localhost:${gatewayPort}/`;
 const setup = await setupSubscriber({ stateDir });
+const registry = new AndroidRegistryState();
 let configured = setup.configured;
 let connection: "offline" | "connecting" = "offline";
 let running: RunningSubscriber | undefined;
 let connectTask: Promise<void> | undefined;
+let registryTask: Promise<void> | undefined;
+let registryGeneration = 0;
 
-const status = (): Record<string, unknown> => ({
-  subscriberPublicKey: setup.publicKey,
-  configured,
-  connection: running?.status().connection ?? connection,
-  homeUrl,
-  navidromeUrl,
-  navidromeFallbackUrl: `http://127.0.0.1:${navidromePort}/`,
-});
+const status = (): Record<string, unknown> => {
+  const currentConnection = running?.status().connection ?? connection;
+  registry.observeConnection(currentConnection);
+  const known = registry.snapshot();
+  return {
+    subscriberPublicKey: setup.publicKey,
+    configured,
+    connection: currentConnection,
+    ...(known ?? {}),
+  };
+};
+
+const refreshRegistry = (): void => {
+  const currentConnection = running?.status().connection ?? connection;
+  registry.observeConnection(currentConnection);
+  if (!registry.shouldRefresh(currentConnection) || registryTask) return;
+  const generation = registryGeneration;
+  registryTask = readHomeRegistry(gatewayPort)
+    .then((loaded) => {
+      if (generation !== registryGeneration) return;
+      registry.accept(
+        createAndroidRegistrySnapshot(loaded, gatewayPort),
+      );
+      controller.publishStatus();
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      registryTask = undefined;
+    });
+};
 
 const connect = (): void => {
   if (!configured || running || connectTask) return;
@@ -68,6 +97,8 @@ const controller = new WorkletController({
     BareKit.IPC.write(frame);
   },
   async configurePublisher(publisherKey) {
+    registryGeneration++;
+    registry.clear();
     await connectTask;
     await running?.stop();
     running = undefined;
@@ -82,6 +113,7 @@ const controller = new WorkletController({
   },
   async stopEcho() {
     clearInterval(statusTimer);
+    registryGeneration++;
     await connectTask;
     await running?.stop();
     running = undefined;
@@ -89,7 +121,10 @@ const controller = new WorkletController({
   },
 });
 
-const statusTimer = setInterval(() => controller.publishStatus(), 1_000);
+const statusTimer = setInterval(() => {
+  refreshRegistry();
+  controller.publishStatus();
+}, 1_000);
 
 BareKit.IPC.on("data", (data) => {
   void controller.receive(data).catch((error) => {

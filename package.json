@@ -12,6 +12,10 @@
       "bare": "bare-fs/promises",
       "default": "node:fs/promises"
     },
+    "node:http": {
+      "bare": "bare-http1",
+      "default": "node:http"
+    },
     "node:net": {
       "bare": "bare-net",
       "default": "node:net"
@@ -61,6 +65,7 @@
   "dependencies": {
     "b4a": "^1.8.1",
     "bare-fs": "^4.7.4",
+    "bare-http1": "^4.5.7",
     "bare-net": "^2.3.2",
     "bare-path": "^3.1.1",
     "bare-stream": "^2.13.3",
