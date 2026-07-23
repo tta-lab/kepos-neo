@@ -97,6 +97,52 @@ class KeposScreenTest {
   }
 
   @Test
+  fun setupExposesTheSubscriberKeyForPublisherAllowlisting() {
+    var copied: String? = null
+    val subscriberKey = "cd".repeat(32)
+    compose.setContent {
+      KeposScreen(
+        snapshot = RuntimeSnapshot(
+          state = RuntimeState.RUNNING,
+          subscriberPublicKey = subscriberKey,
+          configured = false,
+        ),
+        onStart = {},
+        onStop = {},
+        onConfigure = {},
+        onCopyText = { copied = it },
+        onOpenUrl = {},
+      )
+    }
+
+    compose.onNodeWithText("Copy subscriber key").performClick()
+    assertEquals(subscriberKey, copied)
+  }
+
+  @Test
+  fun connectingScreenKeepsSettingsReachable() {
+    compose.setContent {
+      KeposScreen(
+        snapshot = RuntimeSnapshot(
+          state = RuntimeState.RUNNING,
+          subscriberPublicKey = "cd".repeat(32),
+          configured = true,
+          connection = "connecting",
+        ),
+        onStart = {},
+        onStop = {},
+        onConfigure = {},
+        onCopyText = {},
+        onOpenUrl = {},
+      )
+    }
+
+    compose.onNodeWithText("Settings").performClick()
+    compose.onNodeWithText("DIAGNOSTICS").assertIsDisplayed()
+    compose.onNodeWithText("Change publisher").assertIsDisplayed()
+  }
+
+  @Test
   fun reconnectKeepsKnownServicesVisibleButDisablesActions() {
     compose.setContent {
       KeposScreen(

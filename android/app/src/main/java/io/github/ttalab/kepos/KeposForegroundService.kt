@@ -62,6 +62,7 @@ class KeposForegroundService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
+      RuntimeStartPreference(this).setEnabled(false)
       stopRuntime()
       return START_NOT_STICKY
     }
@@ -167,12 +168,14 @@ class KeposForegroundService : Service() {
     private const val LOG_TAG = "KeposRuntime"
 
     fun start(context: Context) {
+      RuntimeStartPreference(context).setEnabled(true)
       context.startForegroundService(
         Intent(context, KeposForegroundService::class.java).setAction(ACTION_START),
       )
     }
 
     fun stop(context: Context) {
+      RuntimeStartPreference(context).setEnabled(false)
       context.startService(
         Intent(context, KeposForegroundService::class.java).setAction(ACTION_STOP),
       )

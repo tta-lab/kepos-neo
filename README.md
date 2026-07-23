@@ -97,8 +97,8 @@ DNS service.
 
 After setup, the dark service home reads the publisher's real Registry and
 shows its display name and published services. It hides the synthetic Home
-entry: HTTP services open through their `*.localhost` URL, Navidrome copies its
-URL for first-time Navic setup, and TCP services show a usage note. Publisher
+entry: known web services open through their `*.localhost` URL, Navidrome copies
+its URL for first-time Navic setup, and unknown or TCP services show a usage note. Publisher
 keys, diagnostics, reconfiguration, and runtime controls live under Settings.
 During reconnect, the last known service list stays visible but disabled.
 
@@ -128,7 +128,8 @@ installed `io.github.ttalab.kepos` app and its state.
 
 The app generates its subscriber identity in app-private storage. Add the
 displayed public key to the publisher allowlist, paste the publisher public key
-into the app, and keep the foreground service running. The Navidrome card copies
+into the app, and keep the foreground service running. An explicit Stop remains
+in effect when the Activity is reopened; Start clears that choice. The Navidrome card copies
 the canonical local URL:
 
 ```text

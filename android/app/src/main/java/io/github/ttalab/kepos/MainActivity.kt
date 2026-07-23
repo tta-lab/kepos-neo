@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
   private var subscription: AutoCloseable? = null
   private var service: KeposForegroundService.LocalBinder? = null
   private var bound = false
+  private val runtimeStartPreference by lazy { RuntimeStartPreference(this) }
   private val requestNotificationPermission = registerForActivityResult(
     ActivityResultContracts.RequestPermission(),
   ) {
@@ -79,7 +80,7 @@ class MainActivity : ComponentActivity() {
       connection,
       Context.BIND_AUTO_CREATE,
     )
-    startRuntime()
+    if (runtimeStartPreference.isEnabled()) startRuntime()
   }
 
   override fun onStop() {

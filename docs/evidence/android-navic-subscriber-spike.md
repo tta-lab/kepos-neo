@@ -74,6 +74,10 @@ The isolated device gate now also checks that:
 - publisher controls and diagnostics stay in Settings;
 - a failed runtime can open Diagnostics and retry;
 - reconnect keeps known services visible while disabling their actions;
+- initial setup copies the subscriber key needed for publisher allowlisting;
+- connecting keeps Settings and publisher reconfiguration reachable;
+- explicit Stop remains stopped across Activity recreation until Start;
+- unknown service IDs remain TCP unless Kepos recognizes them as web services;
 - Activity recreation keeps the same Worklet runtime and loopback listeners.
 
 Android 16 required AndroidX Test 1.7.0 and Espresso 3.7.0. The device test

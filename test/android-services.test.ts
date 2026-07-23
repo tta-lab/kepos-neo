@@ -68,6 +68,22 @@ test("Android registry snapshot preserves publisher service order", () => {
   );
 });
 
+test("Android treats an unknown TCP service conservatively", () => {
+  const registry: HomeRegistry = {
+    schemaVersion: 2,
+    revision: 1,
+    publisher: { displayName: "studio", publisherKey },
+    services: [
+      { id: "home", name: "Home", kind: "tcp" },
+      { id: "postgres", name: "PostgreSQL", kind: "tcp" },
+    ],
+  };
+
+  assert.deepEqual(createAndroidRegistrySnapshot(registry, 17_480).services, [
+    { id: "postgres", name: "PostgreSQL", access: "tcp" },
+  ]);
+});
+
 test("Android reads the publisher registry through its local HTTP surface", async () => {
   const home = await startHomeServer({
     publisherKey,

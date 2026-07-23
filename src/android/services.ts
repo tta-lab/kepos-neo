@@ -17,6 +17,12 @@ export interface AndroidRegistrySnapshot {
   services: AndroidService[];
 }
 
+const KNOWN_HTTP_SERVICE_IDS = new Set([
+  "forgejo",
+  "navidrome",
+  "woodpecker",
+]);
+
 export class AndroidRegistryState {
   private current: AndroidRegistrySnapshot | undefined;
   private refreshRequired = true;
@@ -53,7 +59,7 @@ export function createAndroidRegistrySnapshot(
     services: registry.services
       .filter(({ id }) => id !== "home")
       .map((service): AndroidService => {
-        if (service.id === "ssh") {
+        if (!KNOWN_HTTP_SERVICE_IDS.has(service.id)) {
           return { id: service.id, name: service.name, access: "tcp" };
         }
         return {

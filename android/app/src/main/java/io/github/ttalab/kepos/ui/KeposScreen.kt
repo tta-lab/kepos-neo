@@ -105,6 +105,8 @@ fun KeposScreen(
         model.destination == KeposDestination.SETUP -> SetupScreen(
           title = "Bring your services here.",
           subtitle = "Connect this phone to one trusted Kepos publisher.",
+          subscriberPublicKey = snapshot.subscriberPublicKey,
+          onCopyText = onCopyText,
           onConfigure = onConfigure,
         )
         model.destination == KeposDestination.SERVICES -> ServiceHome(
@@ -132,6 +134,8 @@ fun KeposScreen(
           detail = connectionDetail(model.connection),
           action = null,
           onAction = onStart,
+          secondaryAction = "Settings",
+          onSecondaryAction = { showSettings = true },
         )
       }
     }
@@ -504,6 +508,8 @@ private fun SetupScreen(
   subtitle: String,
   onConfigure: (String) -> Unit,
   onBack: (() -> Unit)? = null,
+  subscriberPublicKey: String? = null,
+  onCopyText: (String) -> Unit = {},
 ) {
   var publisherKey by rememberSaveable { mutableStateOf("") }
   Column(
@@ -536,7 +542,31 @@ private fun SetupScreen(
       color = KeposPalette.Muted,
       style = MaterialTheme.typography.bodyLarge,
     )
-    Spacer(Modifier.height(54.dp))
+    subscriberPublicKey?.let { key ->
+      Spacer(Modifier.height(36.dp))
+      Text(
+        "THIS PHONE'S SUBSCRIBER KEY",
+        color = KeposPalette.Lime,
+        style = MaterialTheme.typography.labelMedium,
+      )
+      Text(
+        fingerprint(key),
+        modifier = Modifier.padding(top = 8.dp),
+        color = KeposPalette.Cream,
+        fontFamily = KeposMono,
+        fontSize = 15.sp,
+      )
+      OutlinedButton(
+        onClick = { onCopyText(key) },
+        modifier = Modifier.padding(top = 8.dp),
+        shape = RoundedCornerShape(4.dp),
+      ) {
+        Icon(Lucide.Copy, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Copy subscriber key")
+      }
+    }
+    Spacer(Modifier.height(36.dp))
     Text(
       "PUBLISHER PUBLIC KEY",
       color = KeposPalette.Lime,
@@ -664,17 +694,17 @@ private fun SettingsScreen(
         Text("Settings", style = MaterialTheme.typography.headlineLarge)
       }
       Spacer(Modifier.height(44.dp))
-      snapshot.publisher?.let { publisher ->
-        SettingsSection("Publisher") {
+      SettingsSection("Publisher") {
+        snapshot.publisher?.let { publisher ->
           SettingValue("Name", publisher.displayName)
           SettingValue("Key", fingerprint(publisher.publisherKey), mono = true)
           SettingsAction("Copy publisher key", Lucide.Copy) {
             onCopyText(publisher.publisherKey)
           }
-          SettingsAction("Change publisher", Lucide.RefreshCw, onClick = onChangePublisher)
-        }
-        Spacer(Modifier.height(30.dp))
+        } ?: SettingValue("Status", "Not verified yet")
+        SettingsAction("Change publisher", Lucide.RefreshCw, onClick = onChangePublisher)
       }
+      Spacer(Modifier.height(30.dp))
       SettingsSection("Diagnostics") {
         SettingValue("Runtime", snapshot.state.name.lowercase())
         SettingValue("Connection", snapshot.connection ?: "unknown")
