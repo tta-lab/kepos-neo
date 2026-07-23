@@ -169,6 +169,9 @@ npm run kepos -- setup publisher \
   --state ~/.local/state/kepos-neo/publisher
 ```
 
+Do not mix publisher policy flags with a configured `[publisher]` table. The
+CLI rejects that ambiguous setup instead of writing inactive policy into state.
+
 The run commands also accept explicit options which replace the matching TOML
 setting for that invocation. For example, repeated `--bootstrap host:port`
 options replace the configured bootstrap list:
@@ -270,16 +273,28 @@ heartbeat recovery or newest-connection replacement. Reconnecting preserves
 localhost ports and identity; active TCP streams still break and must be retried
 by the client.
 
-An empty allowlist revokes every subscriber without rotating the publisher
-key:
+With TOML-owned publisher policy, revoke every subscriber without rotating the
+publisher key by setting the allowlist to empty and restarting the publisher:
+
+```toml
+[publisher]
+display_name = "kosmos"
+allow = []
+services = []
+```
+
+When `[publisher]` is absent, legacy state policy remains available through the
+mutation commands:
 
 ```sh
 npm run kepos -- publisher set-allow \
   --state ~/.local/state/kepos-neo/publisher
 ```
 
-Publisher allowlist and service changes edit stopped state and take effect on
-the next `publisher run`. Replace services without rotating the publisher key:
+These commands fail clearly instead of editing inactive state when
+`[publisher]` exists. For a state-owned publisher, allowlist and service changes
+edit stopped state and take effect on the next `publisher run`. Replace
+services without rotating the publisher key:
 
 ```sh
 npm run kepos -- publisher set-services \

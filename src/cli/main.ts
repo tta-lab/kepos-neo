@@ -194,6 +194,16 @@ async function setupPublisherCommand(
     "--config",
   ]);
   const config = await dependencies.loadConfig(configPath(options));
+  if (
+    config?.publisher &&
+    ["--display-name", "--allow", "--service"].some((name) =>
+      options.has(name),
+    )
+  ) {
+    throw new Error(
+      "publisher policy is managed by TOML; remove CLI policy options",
+    );
+  }
   const displayName =
     singleOption(options, "--display-name") ?? config?.publisher?.displayName;
   if (!displayName) throw new Error("--display-name is required");
@@ -244,7 +254,12 @@ async function setPublisherAllowlistCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
 ): Promise<void> {
-  const options = parseOptions(arguments_, ["--state", "--allow"]);
+  const options = parseOptions(arguments_, [
+    "--state",
+    "--allow",
+    "--config",
+  ]);
+  await rejectTomlPublisherPolicy(options, dependencies);
   await dependencies.setPublisherAllowlist({
     stateDir: requiredState(options),
     subscriberPublicKeys: repeatedOption(options, "--allow"),
@@ -256,7 +271,12 @@ async function setPublisherServicesCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
 ): Promise<void> {
-  const options = parseOptions(arguments_, ["--state", "--service"]);
+  const options = parseOptions(arguments_, [
+    "--state",
+    "--service",
+    "--config",
+  ]);
+  await rejectTomlPublisherPolicy(options, dependencies);
   await dependencies.setPublisherServices({
     stateDir: requiredState(options),
     services: repeatedOption(options, "--service").map(
@@ -264,6 +284,15 @@ async function setPublisherServicesCommand(
     ),
   });
   dependencies.stdout("Publisher services updated");
+}
+
+async function rejectTomlPublisherPolicy(
+  options: ReturnType<typeof parseOptions>,
+  dependencies: CliDependencies,
+): Promise<void> {
+  const config = await dependencies.loadConfig(configPath(options));
+  if (!config?.publisher) return;
+  throw new Error("publisher policy is managed by TOML; edit the config file");
 }
 
 async function runPublisherCommand(

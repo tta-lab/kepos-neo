@@ -242,6 +242,51 @@ test("publisher set commands replace allowlist and services", async () => {
   ]);
 });
 
+test("publisher set commands reject TOML-owned policy", async () => {
+  const cli = fakeCli();
+  cli.dependencies.loadConfig = async (configPath) => {
+    cli.calls.configPaths.push(configPath);
+    return {
+      publisher: {
+        displayName: "kosmos",
+        allow: [],
+        services: [],
+      },
+    };
+  };
+
+  await assert.rejects(
+    () =>
+      runCli(
+        [
+          "publisher",
+          "set-allow",
+          "--state",
+          "./publisher",
+          "--config",
+          "./kepos.toml",
+        ],
+        cli.dependencies,
+      ),
+    /publisher policy is managed by TOML; edit the config file/,
+  );
+  await assert.rejects(
+    () =>
+      runCli(
+        ["publisher", "set-services", "--state", "./publisher"],
+        cli.dependencies,
+      ),
+    /publisher policy is managed by TOML; edit the config file/,
+  );
+
+  assert.deepEqual(cli.calls.setPublisherAllowlist, []);
+  assert.deepEqual(cli.calls.setPublisherServices, []);
+  assert.deepEqual(cli.calls.configPaths, [
+    path.resolve("./kepos.toml"),
+    undefined,
+  ]);
+});
+
 test("publisher run prints human status and awaits signal-safe stop", async () => {
   const cli = fakeCli();
   await runCli(
@@ -367,6 +412,34 @@ test("publisher setup and run use TOML publisher policy", async () => {
       ],
     },
   );
+});
+
+test("publisher setup rejects CLI overrides of TOML policy", async () => {
+  const cli = fakeCli();
+  cli.dependencies.loadConfig = async () => ({
+    publisher: {
+      displayName: "kosmos",
+      allow: [],
+      services: [],
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      runCli(
+        [
+          "setup",
+          "publisher",
+          "--state",
+          "./publisher",
+          "--allow",
+          "44".repeat(32),
+        ],
+        cli.dependencies,
+      ),
+    /publisher policy is managed by TOML; remove CLI policy options/,
+  );
+  assert.deepEqual(cli.calls.setupPublisher, []);
 });
 
 test("subscriber run uses TOML bindings and CLI overrides", async () => {
