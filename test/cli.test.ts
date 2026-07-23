@@ -19,6 +19,7 @@ interface Calls {
   startSubscriber: unknown[];
   subscriberLocks: string[];
   stopped: string[];
+  configPaths: Array<string | undefined>;
 }
 
 function fakeCli(): {
@@ -37,12 +38,17 @@ function fakeCli(): {
     startSubscriber: [],
     subscriberLocks: [],
     stopped: [],
+    configPaths: [],
   };
   const stdout: string[] = [];
   const stderr: string[] = [];
   const dependencies: CliDependencies = {
     stdout: (line) => stdout.push(line),
     stderr: (line) => stderr.push(line),
+    loadConfig: async (configPath) => {
+      calls.configPaths.push(configPath);
+      return undefined;
+    },
     setupPublisher: async (options) => {
       calls.setupPublisher.push(options);
       return { created: true, publisherKey: "11".repeat(32) };
@@ -236,6 +242,51 @@ test("publisher set commands replace allowlist and services", async () => {
   ]);
 });
 
+test("publisher set commands reject TOML-owned policy", async () => {
+  const cli = fakeCli();
+  cli.dependencies.loadConfig = async (configPath) => {
+    cli.calls.configPaths.push(configPath);
+    return {
+      publisher: {
+        displayName: "kosmos",
+        allow: [],
+        services: [],
+      },
+    };
+  };
+
+  await assert.rejects(
+    () =>
+      runCli(
+        [
+          "publisher",
+          "set-allow",
+          "--state",
+          "./publisher",
+          "--config",
+          "./kepos.toml",
+        ],
+        cli.dependencies,
+      ),
+    /publisher policy is managed by TOML; edit the config file/,
+  );
+  await assert.rejects(
+    () =>
+      runCli(
+        ["publisher", "set-services", "--state", "./publisher"],
+        cli.dependencies,
+      ),
+    /publisher policy is managed by TOML; edit the config file/,
+  );
+
+  assert.deepEqual(cli.calls.setPublisherAllowlist, []);
+  assert.deepEqual(cli.calls.setPublisherServices, []);
+  assert.deepEqual(cli.calls.configPaths, [
+    path.resolve("./kepos.toml"),
+    undefined,
+  ]);
+});
+
 test("publisher run prints human status and awaits signal-safe stop", async () => {
   const cli = fakeCli();
   await runCli(
@@ -266,6 +317,178 @@ test("publisher run prints human status and awaits signal-safe stop", async () =
   assert.match(cli.stdout.join("\n"), /Publisher running/);
   assert.match(cli.stdout.join("\n"), /outer\.connected/);
   assert.match(cli.stdout.join("\n"), /attempt=2/);
+});
+
+test("run commands use TOML bootstrap unless the CLI overrides it", async () => {
+  const cli = fakeCli();
+  cli.dependencies.loadConfig = async (configPath) => {
+    cli.calls.configPaths.push(configPath);
+    return {
+      network: {
+        bootstrap: [{ host: "config.example.com", port: 49_737 }],
+      },
+    };
+  };
+
+  await runCli(
+    [
+      "subscriber",
+      "run",
+      "--state",
+      "./subscriber",
+      "--config",
+      "./kepos.toml",
+    ],
+    cli.dependencies,
+  );
+  await runCli(
+    [
+      "publisher",
+      "run",
+      "--state",
+      "./publisher",
+      "--bootstrap",
+      "cli.example.com:49738",
+    ],
+    cli.dependencies,
+  );
+
+  assert.deepEqual(cli.calls.configPaths, [
+    path.resolve("./kepos.toml"),
+    undefined,
+  ]);
+  assert.deepEqual(
+    (cli.calls.startSubscriber[0] as { bootstrap: unknown }).bootstrap,
+    [{ host: "config.example.com", port: 49_737 }],
+  );
+  assert.deepEqual(
+    (cli.calls.startPublisher[0] as { bootstrap: unknown }).bootstrap,
+    [{ host: "cli.example.com", port: 49_738 }],
+  );
+});
+
+test("publisher setup and run use TOML publisher policy", async () => {
+  const cli = fakeCli();
+  const subscriberKey = "33".repeat(32);
+  cli.dependencies.loadConfig = async (configPath) => {
+    cli.calls.configPaths.push(configPath);
+    return {
+      publisher: {
+        displayName: "kosmos",
+        allow: [subscriberKey],
+        services: [
+          { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
+        ],
+      },
+    };
+  };
+
+  await runCli(
+    ["setup", "publisher", "--state", "./publisher"],
+    cli.dependencies,
+  );
+  await runCli(
+    ["publisher", "run", "--state", "./publisher"],
+    cli.dependencies,
+  );
+
+  assert.deepEqual(cli.calls.setupPublisher, [
+    {
+      stateDir: path.resolve("./publisher"),
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberKey],
+      services: [
+        { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
+      ],
+    },
+  ]);
+  assert.deepEqual(
+    (cli.calls.startPublisher[0] as { policy: unknown }).policy,
+    {
+      displayName: "kosmos",
+      allow: [subscriberKey],
+      services: [
+        { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
+      ],
+    },
+  );
+});
+
+test("publisher setup rejects CLI overrides of TOML policy", async () => {
+  const cli = fakeCli();
+  cli.dependencies.loadConfig = async () => ({
+    publisher: {
+      displayName: "kosmos",
+      allow: [],
+      services: [],
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      runCli(
+        [
+          "setup",
+          "publisher",
+          "--state",
+          "./publisher",
+          "--allow",
+          "44".repeat(32),
+        ],
+        cli.dependencies,
+      ),
+    /publisher policy is managed by TOML; remove CLI policy options/,
+  );
+  assert.deepEqual(cli.calls.setupPublisher, []);
+});
+
+test("subscriber run uses TOML bindings and CLI overrides", async () => {
+  const cli = fakeCli();
+  cli.dependencies.loadConfig = async (configPath) => {
+    cli.calls.configPaths.push(configPath);
+    return {
+      network: { bootstrap: [] },
+      subscriber: {
+        gatewayPort: 17_480,
+        route: "auto",
+        services: [{ id: "ssh", localPort: 2_222 }],
+      },
+    };
+  };
+
+  await runCli(
+    ["subscriber", "run", "--state", "./subscriber"],
+    cli.dependencies,
+  );
+  await runCli(
+    [
+      "subscriber",
+      "run",
+      "--state",
+      "./subscriber",
+      "--gateway-port",
+      "18080",
+      "--route",
+      "public",
+      "--service",
+      "ssh:2200",
+    ],
+    cli.dependencies,
+  );
+
+  const [configured, overridden] = cli.calls.startSubscriber as Array<{
+    bootstrap?: unknown;
+    gatewayPort?: number;
+    route: string;
+    services: Array<{ id: string; localPort: number }>;
+  }>;
+  assert.equal(configured.bootstrap, undefined);
+  assert.equal(configured.gatewayPort, 17_480);
+  assert.equal(configured.route, "auto");
+  assert.deepEqual(configured.services, [{ id: "ssh", localPort: 2_222 }]);
+  assert.equal(overridden.gatewayPort, 18_080);
+  assert.equal(overridden.route, "public");
+  assert.deepEqual(overridden.services, [{ id: "ssh", localPort: 2_200 }]);
 });
 
 test("subscriber run maps services and writes NDJSON observations", async () => {

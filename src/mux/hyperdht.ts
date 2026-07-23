@@ -11,6 +11,26 @@ export interface DhtAddress {
   port: number;
 }
 
+export type DhtHolepunch = (
+  remoteFirewall: number,
+  localFirewall: number,
+  remoteAddresses: DhtAddress[],
+  localAddresses: DhtAddress[],
+) => boolean;
+
+interface DhtStats {
+  punches: {
+    consistent: number;
+    random: number;
+    open: number;
+  };
+  relaying: {
+    attempts: number;
+    successes: number;
+    aborts: number;
+  };
+}
+
 export interface DhtKeyPair {
   publicKey: Uint8Array;
   secretKey: Uint8Array;
@@ -36,6 +56,7 @@ export interface DhtNode {
       keyPair: DhtKeyPair;
       localConnection: boolean;
       reusableSocket: true;
+      holepunch?: DhtHolepunch;
     },
   ) => DhtStream;
   createServer: (
@@ -45,6 +66,7 @@ export interface DhtNode {
     },
     onConnection: (stream: DhtStream) => void,
   ) => DhtServer;
+  stats: DhtStats;
   destroy: (options?: { force?: boolean }) => Promise<void>;
 }
 
@@ -87,6 +109,42 @@ export function dhtStreamSnapshot(stream: DhtStream): unknown {
     ...base,
     ...(udx ? { udx } : {}),
   });
+}
+
+export function dhtFirewallName(value: number): string {
+  if (value === 1) return "open";
+  if (value === 2) return "consistent";
+  if (value === 3) return "random";
+  return "unknown";
+}
+
+export function holepunchObservation(
+  remoteFirewall: number,
+  localFirewall: number,
+  remoteAddresses: DhtAddress[],
+  localAddresses: DhtAddress[],
+): Record<string, string | number> {
+  return {
+    remoteFirewall: dhtFirewallName(remoteFirewall),
+    localFirewall: dhtFirewallName(localFirewall),
+    remoteAddressCount: remoteAddresses.length,
+    localAddressCount: localAddresses.length,
+  };
+}
+
+export function dhtStatsSnapshot(node: DhtNode): DhtStats {
+  return {
+    punches: {
+      consistent: node.stats.punches.consistent,
+      random: node.stats.punches.random,
+      open: node.stats.punches.open,
+    },
+    relaying: {
+      attempts: node.stats.relaying.attempts,
+      successes: node.stats.relaying.successes,
+      aborts: node.stats.relaying.aborts,
+    },
+  };
 }
 
 function udxStreamSnapshot(rawStream: unknown): Record<string, number> | undefined {

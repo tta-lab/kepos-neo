@@ -5,6 +5,7 @@ export type ObservationDirection =
 export type ObservationName =
   | "outer.attempt"
   | "outer.handshake"
+  | "outer.holepunch"
   | "outer.connected"
   | "outer.unhealthy"
   | "outer.retry"

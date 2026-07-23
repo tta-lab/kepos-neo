@@ -115,9 +115,66 @@ npm run kepos -- subscriber set-publisher \
   --publisher-key <publisher-public-key>
 ```
 
-Both run commands accept repeated `--bootstrap host:port` options. Omitting
-them retains HyperDHT's built-in bootstrap set. An explicit list replaces that
-set:
+Publisher setup and both run commands read persistent CLI settings from
+`$XDG_CONFIG_HOME/kepos/config.toml`, or `~/.config/kepos/config.toml` when
+`XDG_CONFIG_HOME` is unset:
+
+```toml
+[network]
+bootstrap = [
+  "47.94.213.63:49737",
+  "203.91.75.19:49738",
+]
+
+[publisher]
+display_name = "kosmos"
+allow = ["<subscriber-public-key>"]
+
+[[publisher.services]]
+id = "ssh"
+name = "SSH"
+target_port = 22
+
+[[publisher.services]]
+id = "navidrome"
+name = "Navidrome"
+target_port = 4533
+
+[subscriber]
+gateway_port = 17480
+route = "auto"
+
+[[subscriber.services]]
+id = "ssh"
+local_port = 2222
+```
+
+Use `--config <path>` to select another file. A missing default file retains
+the existing state-based publisher policy and runtime defaults; a missing
+explicit file is an error. An empty `network.bootstrap` array selects
+HyperDHT's built-in bootstrap set. An empty publisher allowlist denies every
+subscriber, while empty publisher or subscriber service arrays mean Home-only
+publishing or no raw TCP listeners respectively.
+
+When `[publisher]` exists, it is the complete runtime publisher policy and all
+three fields (`display_name`, `allow`, and `services`) are required. Existing
+installations without that table continue to read display name, allowlist, and
+services from publisher state. Publisher and subscriber private keys, plus the
+subscriber's paired publisher contact, always remain in the state directory.
+
+`setup publisher` can create the publisher identity directly from this TOML:
+
+```sh
+npm run kepos -- setup publisher \
+  --state ~/.local/state/kepos-neo/publisher
+```
+
+Do not mix publisher policy flags with a configured `[publisher]` table. The
+CLI rejects that ambiguous setup instead of writing inactive policy into state.
+
+The run commands also accept explicit options which replace the matching TOML
+setting for that invocation. For example, repeated `--bootstrap host:port`
+options replace the configured bootstrap list:
 
 ```sh
 npm run kepos -- subscriber run \
@@ -133,7 +190,8 @@ HyperDHT crawling, geographic reports, candidate validation, and regional
 bootstrap benchmarks live in
 [`tta-lab/hyperdht-observatory`](https://github.com/tta-lab/hyperdht-observatory).
 Kepos does not fetch or trust Observatory output at runtime; operators review
-and pass any chosen endpoints explicitly with `--bootstrap`.
+and put chosen endpoints in the TOML config or pass them explicitly with
+`--bootstrap`.
 
 Run one local HTTP gateway plus any raw TCP listeners:
 
@@ -156,8 +214,8 @@ http://navidrome.localhost:17480/
 
 The gateway maps the request hostname to a Protomux service ID. HTTP services
 do not need a subscriber `--service` option or a separate local process.
-`--service id:local-port` remains for raw TCP services such as SSH. If 17480
-is occupied, select another gateway port:
+`--service id:local-port` remains as a one-run override for raw TCP services
+such as SSH. If 17480 is occupied, select another gateway port:
 
 Home treats the reserved `ssh` service as raw TCP. Its local port belongs to
 the subscriber configuration, so the publisher Home does not guess or display
@@ -186,6 +244,11 @@ timeout, retransmit, recovery, and byte/packet counters. These are sanitized
 diagnostics whose shape may change; do not treat them as a stable API or copy
 state files into logs.
 
+When HyperDHT attempts a punch, `outer.holepunch` records the local and remote
+firewall classes (`open`, `consistent`, `random`, or `unknown`) and only the
+number of candidate addresses. Connection and close events also include
+cumulative DHT punch and relay counters. No candidate IP addresses are logged.
+
 The command prints the local Home URL immediately and keeps the gateway and raw
 TCP listeners bound while the publisher is unavailable. Connection attempts
 continue in the background instead of terminating the CLI.
@@ -210,16 +273,28 @@ heartbeat recovery or newest-connection replacement. Reconnecting preserves
 localhost ports and identity; active TCP streams still break and must be retried
 by the client.
 
-An empty allowlist revokes every subscriber without rotating the publisher
-key:
+With TOML-owned publisher policy, revoke every subscriber without rotating the
+publisher key by setting the allowlist to empty and restarting the publisher:
+
+```toml
+[publisher]
+display_name = "kosmos"
+allow = []
+services = []
+```
+
+When `[publisher]` is absent, legacy state policy remains available through the
+mutation commands:
 
 ```sh
 npm run kepos -- publisher set-allow \
   --state ~/.local/state/kepos-neo/publisher
 ```
 
-Publisher allowlist and service changes edit stopped state and take effect on
-the next `publisher run`. Replace services without rotating the publisher key:
+These commands fail clearly instead of editing inactive state when
+`[publisher]` exists. For a state-owned publisher, allowlist and service changes
+edit stopped state and take effect on the next `publisher run`. Replace
+services without rotating the publisher key:
 
 ```sh
 npm run kepos -- publisher set-services \

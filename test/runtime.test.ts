@@ -165,6 +165,50 @@ test("publisher runtime rejects state that the shared state loader rejects", asy
   }
 });
 
+test("publisher runtime policy overrides legacy state policy", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-runtime-policy-"));
+  const stateDir = path.join(root, "publisher");
+  await setupPublisher({
+    stateDir,
+    displayName: "legacy",
+    subscriberPublicKeys: [],
+    services: [],
+  });
+  const testnet = await createHyperDhtTestnet(3);
+  let publisher: Awaited<ReturnType<typeof startPublisher>> | undefined;
+
+  try {
+    publisher = await startPublisher({
+      stateDir,
+      bootstrap: testnet.bootstrap,
+      policy: {
+        displayName: "kosmos",
+        allow: [],
+        services: [
+          { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
+        ],
+      },
+    });
+    const registry = (await fetch(
+      new URL("/.well-known/kepos/services.json", publisher.home.url),
+    ).then((response) => response.json())) as {
+      publisher: { displayName: string };
+      services: Array<{ id: string }>;
+    };
+    assert.equal(registry.publisher.displayName, "kosmos");
+    assert.deepEqual(
+      registry.services.map(({ id }) => id),
+      ["home", "navidrome"],
+    );
+  } finally {
+    await Promise.allSettled([
+      publisher?.stop(),
+      testnet.destroy(),
+      rm(root, { recursive: true, force: true }),
+    ]);
+  }
+});
+
 test("subscriber runtime rejects state that the shared state loader rejects", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-runtime-state-"));
   const publisherState = path.join(root, "publisher");

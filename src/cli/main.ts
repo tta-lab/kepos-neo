@@ -42,12 +42,17 @@ import {
   repeatedOption,
   requiredOption,
   requiredState,
+  singleOption,
 } from "./options.js";
 import {
   acquireSubscriberRuntimeLock,
   type SubscriberRuntimeLock,
 } from "./runtime-lock.js";
 import { waitForSignal } from "./signals.js";
+import {
+  loadCliConfig,
+  type CliConfig,
+} from "./config.js";
 
 interface CliPublisher {
   home: { url: string };
@@ -67,6 +72,7 @@ interface CliSubscriber {
 export interface CliDependencies {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
+  loadConfig: (configPath?: string) => Promise<CliConfig | undefined>;
   setupPublisher: (
     options: SetupPublisherOptions,
   ) => Promise<SetupPublisherResult>;
@@ -102,6 +108,7 @@ export function createDefaultCliDependencies(
   return {
     stdout: output.stdout ?? console.log,
     stderr: output.stderr ?? console.error,
+    loadConfig: loadCliConfig,
     setupPublisher,
     setupSubscriber,
     setSubscriberPublisher,
@@ -184,14 +191,33 @@ async function setupPublisherCommand(
     "--display-name",
     "--allow",
     "--service",
+    "--config",
   ]);
+  const config = await dependencies.loadConfig(configPath(options));
+  if (
+    config?.publisher &&
+    ["--display-name", "--allow", "--service"].some((name) =>
+      options.has(name),
+    )
+  ) {
+    throw new Error(
+      "publisher policy is managed by TOML; remove CLI policy options",
+    );
+  }
+  const displayName =
+    singleOption(options, "--display-name") ?? config?.publisher?.displayName;
+  if (!displayName) throw new Error("--display-name is required");
+  const subscriberPublicKeys = options.has("--allow")
+    ? repeatedOption(options, "--allow")
+    : (config?.publisher?.allow ?? []);
+  const services = options.has("--service")
+    ? repeatedOption(options, "--service").map(parsePublisherService)
+    : (config?.publisher?.services ?? []);
   const result = await dependencies.setupPublisher({
     stateDir: requiredState(options),
-    displayName: requiredOption(options, "--display-name"),
-    subscriberPublicKeys: repeatedOption(options, "--allow"),
-    services: repeatedOption(options, "--service").map(
-      parsePublisherService,
-    ),
+    displayName,
+    subscriberPublicKeys,
+    services,
   });
   dependencies.stdout(`Publisher key: ${result.publisherKey}`);
 }
@@ -228,7 +254,12 @@ async function setPublisherAllowlistCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
 ): Promise<void> {
-  const options = parseOptions(arguments_, ["--state", "--allow"]);
+  const options = parseOptions(arguments_, [
+    "--state",
+    "--allow",
+    "--config",
+  ]);
+  await rejectTomlPublisherPolicy(options, dependencies);
   await dependencies.setPublisherAllowlist({
     stateDir: requiredState(options),
     subscriberPublicKeys: repeatedOption(options, "--allow"),
@@ -240,7 +271,12 @@ async function setPublisherServicesCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
 ): Promise<void> {
-  const options = parseOptions(arguments_, ["--state", "--service"]);
+  const options = parseOptions(arguments_, [
+    "--state",
+    "--service",
+    "--config",
+  ]);
+  await rejectTomlPublisherPolicy(options, dependencies);
   await dependencies.setPublisherServices({
     stateDir: requiredState(options),
     services: repeatedOption(options, "--service").map(
@@ -248,6 +284,15 @@ async function setPublisherServicesCommand(
     ),
   });
   dependencies.stdout("Publisher services updated");
+}
+
+async function rejectTomlPublisherPolicy(
+  options: ReturnType<typeof parseOptions>,
+  dependencies: CliDependencies,
+): Promise<void> {
+  const config = await dependencies.loadConfig(configPath(options));
+  if (!config?.publisher) return;
+  throw new Error("publisher policy is managed by TOML; edit the config file");
 }
 
 async function runPublisherCommand(
@@ -258,11 +303,14 @@ async function runPublisherCommand(
     "--state",
     "--observations",
     "--bootstrap",
+    "--config",
   ]);
   const mode = observationMode(options);
+  const config = await dependencies.loadConfig(configPath(options));
   const running = await dependencies.startPublisher({
     stateDir: requiredState(options),
-    bootstrap: parseBootstrapOptions(options),
+    bootstrap: resolvedBootstrap(options, config),
+    policy: config?.publisher,
     observe: observationWriter(mode, dependencies),
   });
   statusWriter(mode, dependencies)(
@@ -282,11 +330,13 @@ async function runSubscriberCommand(
     "--route",
     "--observations",
     "--bootstrap",
+    "--config",
   ]);
   const mode = observationMode(options);
-  const services = repeatedOption(options, "--service").map(
-    parseSubscriberService,
-  );
+  const config = await dependencies.loadConfig(configPath(options));
+  const services = options.has("--service")
+    ? repeatedOption(options, "--service").map(parseSubscriberService)
+    : (config?.subscriber?.services ?? []);
   if (new Set(services.map(({ id }) => id)).size !== services.length) {
     throw new Error("subscriber services must have unique ids");
   }
@@ -295,10 +345,13 @@ async function runSubscriberCommand(
   try {
     const running = await dependencies.startSubscriber({
       stateDir,
-      bootstrap: parseBootstrapOptions(options),
-      gatewayPort: parseGatewayPortOption(options),
+      bootstrap: resolvedBootstrap(options, config),
+      gatewayPort:
+        parseGatewayPortOption(options) ?? config?.subscriber?.gatewayPort,
       services,
-      route: parseRouteOption(options),
+      route: options.has("--route")
+        ? parseRouteOption(options)
+        : (config?.subscriber?.route ?? "auto"),
       observe: observationWriter(mode, dependencies),
       waitForPublisher: false,
     });
@@ -314,6 +367,22 @@ async function runSubscriberCommand(
   } finally {
     await lock.release();
   }
+}
+
+function resolvedBootstrap(
+  options: ReturnType<typeof parseOptions>,
+  config: CliConfig | undefined,
+) {
+  const bootstrap =
+    parseBootstrapOptions(options) ?? config?.network?.bootstrap;
+  return bootstrap && bootstrap.length > 0 ? bootstrap : undefined;
+}
+
+function configPath(
+  options: ReturnType<typeof parseOptions>,
+): string | undefined {
+  const value = singleOption(options, "--config");
+  return value === undefined ? undefined : path.resolve(value);
 }
 
 function observationWriter(

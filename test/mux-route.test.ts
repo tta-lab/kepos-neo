@@ -117,6 +117,43 @@ test("reconnect observations report failed attempt delay and total recovery", as
   await connection.stop();
 });
 
+test("connection attempts carry holepunch details and DHT stats", async () => {
+  const events: Observation[] = [];
+  const stream = new FakeDhtStream(true);
+  const connection = createPublisherConnection({
+    connect: (observe) => {
+      observe("outer.holepunch", {
+        localFirewall: "consistent",
+        remoteFirewall: "random",
+        localAddressCount: 2,
+        remoteAddressCount: 1,
+      });
+      return stream;
+    },
+    dhtStats: () => ({
+      punches: { consistent: 1, random: 1, open: 0 },
+      relaying: { attempts: 1, successes: 0, aborts: 1 },
+    }),
+    now: () => 1_000,
+    observe: (event) => events.push(event),
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  await connection.start();
+
+  assert.equal(events[1]?.event, "outer.holepunch");
+  assert.equal(events[1]?.localFirewall, "consistent");
+  assert.deepEqual(
+    events.find(({ event }) => event === "outer.connected")?.dht,
+    {
+      punches: { consistent: 1, random: 1, open: 0 },
+      relaying: { attempts: 1, successes: 0, aborts: 1 },
+    },
+  );
+  await connection.stop();
+});
+
 test("a pending DHT attempt times out before the next retry", async () => {
   const events: Observation[] = [];
   const initial = new FakeDhtStream(true);
