@@ -92,9 +92,10 @@ the generated bundle and contained `kepos/control/1` and the heartbeat timeout
 path. The isolated `npm run android:device-check` gate then passed again on the
 same device without replacing or stopping the dogfood package.
 
-`npm run check` also passed 129 tests with 96.92% line, 84.69% branch, and
-92.24% function coverage. `npm run android:check` passed Kotlin/JVM tests, lint,
-the Bare bundle, and debug assembly.
+`npm run check` also passed 155 tests and its coverage thresholds.
+`npm run android:check` passed Kotlin/JVM tests, lint, the Bare bundle, and debug
+assembly. The full isolated device gate passed 8/8 on the Pixel 7a and again on
+an API 35 arm64 emulator after the review fixes.
 
 The arm64-only debug APK is 89 MiB. Before applying the intended spike ABI
 filter, one APK contained four copies of Bare Kit and its addons and was 345
