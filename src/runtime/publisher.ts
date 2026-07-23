@@ -21,9 +21,16 @@ import {
 } from "../mux/transport.js";
 import { loadPublisherState } from "../state/publisher.js";
 
+export interface PublisherRuntimePolicy {
+  displayName: string;
+  allow: string[];
+  services: Array<{ id: string; name: string; targetPort: number }>;
+}
+
 export interface StartPublisherOptions {
   stateDir: string;
   bootstrap?: DhtAddress[];
+  policy?: PublisherRuntimePolicy;
   log?: (line: string) => void;
   now?: () => number;
   observe?: Observe;
@@ -51,24 +58,29 @@ export async function startPublisher(
   options: StartPublisherOptions,
 ): Promise<RunningPublisher> {
   const { config, manifest } = await loadPublisherState(options.stateDir);
+  const policy = options.policy ?? {
+    displayName: manifest.displayName,
+    allow: config.allow,
+    services: manifest.services,
+  };
   const keyPair = keyPairFromSeed(config.seed);
   const publisherKey = b4a.toString(keyPair.publicKey, "hex");
   const home = await startHomeServer({
     publisherKey,
-    displayName: manifest.displayName,
-    services: manifest.services.map(({ id, name, kind }) => ({
+    displayName: policy.displayName,
+    services: policy.services.map(({ id, name }) => ({
       id,
       name,
-      kind,
+      kind: "tcp",
     })),
   });
   const targets = new Map<string, number>([
     ["home", home.port],
-    ...manifest.services.map(
+    ...policy.services.map(
       (service): [string, number] => [service.id, service.targetPort],
     ),
   ]);
-  const allow = new Set(config.allow);
+  const allow = new Set(policy.allow);
   const dht = createDht({ bootstrap: options.bootstrap, keyPair });
   const now = options.now ?? Date.now;
   const streams = new Set<DhtStream>();

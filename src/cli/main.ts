@@ -191,14 +191,23 @@ async function setupPublisherCommand(
     "--display-name",
     "--allow",
     "--service",
+    "--config",
   ]);
+  const config = await dependencies.loadConfig(configPath(options));
+  const displayName =
+    singleOption(options, "--display-name") ?? config?.publisher?.displayName;
+  if (!displayName) throw new Error("--display-name is required");
+  const subscriberPublicKeys = options.has("--allow")
+    ? repeatedOption(options, "--allow")
+    : (config?.publisher?.allow ?? []);
+  const services = options.has("--service")
+    ? repeatedOption(options, "--service").map(parsePublisherService)
+    : (config?.publisher?.services ?? []);
   const result = await dependencies.setupPublisher({
     stateDir: requiredState(options),
-    displayName: requiredOption(options, "--display-name"),
-    subscriberPublicKeys: repeatedOption(options, "--allow"),
-    services: repeatedOption(options, "--service").map(
-      parsePublisherService,
-    ),
+    displayName,
+    subscriberPublicKeys,
+    services,
   });
   dependencies.stdout(`Publisher key: ${result.publisherKey}`);
 }
@@ -271,8 +280,8 @@ async function runPublisherCommand(
   const config = await dependencies.loadConfig(configPath(options));
   const running = await dependencies.startPublisher({
     stateDir: requiredState(options),
-    bootstrap:
-      parseBootstrapOptions(options) ?? config?.network?.bootstrap,
+    bootstrap: resolvedBootstrap(options, config),
+    policy: config?.publisher,
     observe: observationWriter(mode, dependencies),
   });
   statusWriter(mode, dependencies)(
@@ -296,9 +305,9 @@ async function runSubscriberCommand(
   ]);
   const mode = observationMode(options);
   const config = await dependencies.loadConfig(configPath(options));
-  const services = repeatedOption(options, "--service").map(
-    parseSubscriberService,
-  );
+  const services = options.has("--service")
+    ? repeatedOption(options, "--service").map(parseSubscriberService)
+    : (config?.subscriber?.services ?? []);
   if (new Set(services.map(({ id }) => id)).size !== services.length) {
     throw new Error("subscriber services must have unique ids");
   }
@@ -307,11 +316,13 @@ async function runSubscriberCommand(
   try {
     const running = await dependencies.startSubscriber({
       stateDir,
-      bootstrap:
-        parseBootstrapOptions(options) ?? config?.network?.bootstrap,
-      gatewayPort: parseGatewayPortOption(options),
+      bootstrap: resolvedBootstrap(options, config),
+      gatewayPort:
+        parseGatewayPortOption(options) ?? config?.subscriber?.gatewayPort,
       services,
-      route: parseRouteOption(options),
+      route: options.has("--route")
+        ? parseRouteOption(options)
+        : (config?.subscriber?.route ?? "auto"),
       observe: observationWriter(mode, dependencies),
       waitForPublisher: false,
     });
@@ -327,6 +338,15 @@ async function runSubscriberCommand(
   } finally {
     await lock.release();
   }
+}
+
+function resolvedBootstrap(
+  options: ReturnType<typeof parseOptions>,
+  config: CliConfig | undefined,
+) {
+  const bootstrap =
+    parseBootstrapOptions(options) ?? config?.network?.bootstrap;
+  return bootstrap && bootstrap.length > 0 ? bootstrap : undefined;
 }
 
 function configPath(

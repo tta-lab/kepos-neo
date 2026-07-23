@@ -115,7 +115,7 @@ npm run kepos -- subscriber set-publisher \
   --publisher-key <publisher-public-key>
 ```
 
-Both run commands read network settings from
+Publisher setup and both run commands read persistent CLI settings from
 `$XDG_CONFIG_HOME/kepos/config.toml`, or `~/.config/kepos/config.toml` when
 `XDG_CONFIG_HOME` is unset:
 
@@ -125,12 +125,53 @@ bootstrap = [
   "47.94.213.63:49737",
   "203.91.75.19:49738",
 ]
+
+[publisher]
+display_name = "kosmos"
+allow = ["<subscriber-public-key>"]
+
+[[publisher.services]]
+id = "ssh"
+name = "SSH"
+target_port = 22
+
+[[publisher.services]]
+id = "navidrome"
+name = "Navidrome"
+target_port = 4533
+
+[subscriber]
+gateway_port = 17480
+route = "auto"
+
+[[subscriber.services]]
+id = "ssh"
+local_port = 2222
 ```
 
 Use `--config <path>` to select another file. A missing default file retains
-HyperDHT's built-in bootstrap set; a missing explicit file is an error. Both
-run commands also accept repeated `--bootstrap host:port` options, which
-replace the TOML list for that invocation:
+the existing state-based publisher policy and runtime defaults; a missing
+explicit file is an error. An empty `network.bootstrap` array selects
+HyperDHT's built-in bootstrap set. An empty publisher allowlist denies every
+subscriber, while empty publisher or subscriber service arrays mean Home-only
+publishing or no raw TCP listeners respectively.
+
+When `[publisher]` exists, it is the complete runtime publisher policy and all
+three fields (`display_name`, `allow`, and `services`) are required. Existing
+installations without that table continue to read display name, allowlist, and
+services from publisher state. Publisher and subscriber private keys, plus the
+subscriber's paired publisher contact, always remain in the state directory.
+
+`setup publisher` can create the publisher identity directly from this TOML:
+
+```sh
+npm run kepos -- setup publisher \
+  --state ~/.local/state/kepos-neo/publisher
+```
+
+The run commands also accept explicit options which replace the matching TOML
+setting for that invocation. For example, repeated `--bootstrap host:port`
+options replace the configured bootstrap list:
 
 ```sh
 npm run kepos -- subscriber run \
@@ -170,8 +211,8 @@ http://navidrome.localhost:17480/
 
 The gateway maps the request hostname to a Protomux service ID. HTTP services
 do not need a subscriber `--service` option or a separate local process.
-`--service id:local-port` remains for raw TCP services such as SSH. If 17480
-is occupied, select another gateway port:
+`--service id:local-port` remains as a one-run override for raw TCP services
+such as SSH. If 17480 is occupied, select another gateway port:
 
 Home treats the reserved `ssh` service as raw TCP. Its local port belongs to
 the subscriber configuration, so the publisher Home does not guess or display

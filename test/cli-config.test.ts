@@ -27,6 +27,84 @@ bootstrap = ["47.94.213.63:49737", "dht.example.com:49738"]
   );
 });
 
+test("CLI config parses publisher and subscriber policy", () => {
+  const subscriberKey = "11".repeat(32);
+  assert.deepEqual(
+    parseCliConfig(`
+[network]
+bootstrap = []
+
+[publisher]
+display_name = "kosmos"
+allow = ["${subscriberKey}"]
+
+[[publisher.services]]
+id = "navidrome"
+name = "Navidrome"
+target_port = 4533
+
+[subscriber]
+gateway_port = 17480
+route = "auto"
+
+[[subscriber.services]]
+id = "ssh"
+local_port = 2222
+`),
+    {
+      network: {},
+      publisher: {
+        displayName: "kosmos",
+        allow: [subscriberKey],
+        services: [
+          { id: "navidrome", name: "Navidrome", targetPort: 4533 },
+        ],
+      },
+      subscriber: {
+        gatewayPort: 17_480,
+        route: "auto",
+        services: [{ id: "ssh", localPort: 2_222 }],
+      },
+    },
+  );
+});
+
+test("CLI config keeps deny-all and Home-only publisher policy explicit", () => {
+  assert.deepEqual(
+    parseCliConfig(`
+[publisher]
+display_name = "kosmos"
+allow = []
+services = []
+`),
+    {
+      publisher: {
+        displayName: "kosmos",
+        allow: [],
+        services: [],
+      },
+    },
+  );
+});
+
+test("CLI config rejects incomplete or invalid role policy", () => {
+  assert.throws(
+    () => parseCliConfig('[publisher]\ndisplay_name = "kosmos"'),
+    /publisher\.allow must be an array/,
+  );
+  assert.throws(
+    () =>
+      parseCliConfig(
+        '[publisher]\ndisplay_name = "kosmos"\nallow = []\nservices = []\nextra = true',
+      ),
+    /unknown field: publisher\.extra/,
+  );
+  assert.throws(
+    () => parseCliConfig('[subscriber]\ngateway_port = 70000'),
+    /subscriber\.gateway_port.*65535/,
+  );
+});
+
 test("CLI config rejects unknown fields and malformed endpoints", () => {
   assert.throws(
     () => parseCliConfig("[network]\nbootstraps = []"),
