@@ -9,7 +9,11 @@ import {
   type Observation,
 } from "../src/mux/observability.js";
 import {
+  dhtFirewallName,
+  dhtStatsSnapshot,
   dhtStreamSnapshot,
+  holepunchObservation,
+  type DhtNode,
   type DhtStream,
 } from "../src/mux/hyperdht.js";
 import {
@@ -182,6 +186,38 @@ test("DHT stream snapshots include live UDX congestion and retransmit state", ()
       packetsReceived: 340,
       packetsDroppedByKernel: 4,
     },
+  });
+});
+
+test("DHT observations expose NAT classes and aggregate punch stats without addresses", () => {
+  assert.equal(dhtFirewallName(0), "unknown");
+  assert.equal(dhtFirewallName(1), "open");
+  assert.equal(dhtFirewallName(2), "consistent");
+  assert.equal(dhtFirewallName(3), "random");
+  assert.equal(dhtFirewallName(99), "unknown");
+  assert.deepEqual(
+    holepunchObservation(3, 2, [{ host: "remote", port: 1 }], [
+      { host: "local", port: 2 },
+      { host: "local-2", port: 3 },
+    ]),
+    {
+      remoteFirewall: "random",
+      localFirewall: "consistent",
+      remoteAddressCount: 1,
+      localAddressCount: 2,
+    },
+  );
+
+  const node = {
+    stats: {
+      punches: { consistent: 2, random: 3, open: 5 },
+      relaying: { attempts: 7, successes: 1, aborts: 6 },
+      queries: { sent: 999 },
+    },
+  } as unknown as DhtNode;
+  assert.deepEqual(dhtStatsSnapshot(node), {
+    punches: { consistent: 2, random: 3, open: 5 },
+    relaying: { attempts: 7, successes: 1, aborts: 6 },
   });
 });
 

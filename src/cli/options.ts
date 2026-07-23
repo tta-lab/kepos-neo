@@ -105,14 +105,21 @@ export function parseBootstrapOptions(
 ): DhtAddress[] | undefined {
   const values = repeatedOption(options, "--bootstrap");
   if (values.length === 0) return undefined;
+  return parseBootstrapValues(values, "--bootstrap");
+}
+
+export function parseBootstrapValues(
+  values: readonly string[],
+  label: string,
+): DhtAddress[] {
   return values.map((value) => {
     const [host, port, ...extra] = value.split(":");
     if (!host || !port || extra.length > 0) {
-      throw new Error("--bootstrap must use host:port");
+      throw new Error(`${label} must use host:port`);
     }
     return {
       host,
-      port: parseTcpPort(port, "--bootstrap port"),
+      port: parseTcpPort(port, `${label} port`),
     };
   });
 }

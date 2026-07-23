@@ -42,12 +42,17 @@ import {
   repeatedOption,
   requiredOption,
   requiredState,
+  singleOption,
 } from "./options.js";
 import {
   acquireSubscriberRuntimeLock,
   type SubscriberRuntimeLock,
 } from "./runtime-lock.js";
 import { waitForSignal } from "./signals.js";
+import {
+  loadCliConfig,
+  type CliConfig,
+} from "./config.js";
 
 interface CliPublisher {
   home: { url: string };
@@ -67,6 +72,7 @@ interface CliSubscriber {
 export interface CliDependencies {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
+  loadConfig: (configPath?: string) => Promise<CliConfig | undefined>;
   setupPublisher: (
     options: SetupPublisherOptions,
   ) => Promise<SetupPublisherResult>;
@@ -102,6 +108,7 @@ export function createDefaultCliDependencies(
   return {
     stdout: output.stdout ?? console.log,
     stderr: output.stderr ?? console.error,
+    loadConfig: loadCliConfig,
     setupPublisher,
     setupSubscriber,
     setSubscriberPublisher,
@@ -258,11 +265,14 @@ async function runPublisherCommand(
     "--state",
     "--observations",
     "--bootstrap",
+    "--config",
   ]);
   const mode = observationMode(options);
+  const config = await dependencies.loadConfig(configPath(options));
   const running = await dependencies.startPublisher({
     stateDir: requiredState(options),
-    bootstrap: parseBootstrapOptions(options),
+    bootstrap:
+      parseBootstrapOptions(options) ?? config?.network?.bootstrap,
     observe: observationWriter(mode, dependencies),
   });
   statusWriter(mode, dependencies)(
@@ -282,8 +292,10 @@ async function runSubscriberCommand(
     "--route",
     "--observations",
     "--bootstrap",
+    "--config",
   ]);
   const mode = observationMode(options);
+  const config = await dependencies.loadConfig(configPath(options));
   const services = repeatedOption(options, "--service").map(
     parseSubscriberService,
   );
@@ -295,7 +307,8 @@ async function runSubscriberCommand(
   try {
     const running = await dependencies.startSubscriber({
       stateDir,
-      bootstrap: parseBootstrapOptions(options),
+      bootstrap:
+        parseBootstrapOptions(options) ?? config?.network?.bootstrap,
       gatewayPort: parseGatewayPortOption(options),
       services,
       route: parseRouteOption(options),
@@ -314,6 +327,13 @@ async function runSubscriberCommand(
   } finally {
     await lock.release();
   }
+}
+
+function configPath(
+  options: ReturnType<typeof parseOptions>,
+): string | undefined {
+  const value = singleOption(options, "--config");
+  return value === undefined ? undefined : path.resolve(value);
 }
 
 function observationWriter(

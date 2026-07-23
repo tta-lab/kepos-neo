@@ -12,7 +12,9 @@ import {
 } from "./cancellation.js";
 import {
   createDht,
+  dhtStatsSnapshot,
   dhtStreamSnapshot,
+  holepunchObservation,
   keyPairFromSecretKey,
   type DhtAddress,
   type DhtStream,
@@ -103,11 +105,29 @@ export async function startSubscriber(
   const now = options.now ?? Date.now;
   const route = options.route ?? "auto";
   const connection = createPublisherConnection({
-    connect: () =>
+    connect: (observe) =>
       dht.connect(Buffer.from(contact.publisherKey, "hex"), {
         keyPair,
         ...connectionOptionsForRoute(route),
+        holepunch: (
+          remoteFirewall,
+          localFirewall,
+          remoteAddresses,
+          localAddresses,
+        ) => {
+          observe(
+            "outer.holepunch",
+            holepunchObservation(
+              remoteFirewall,
+              localFirewall,
+              remoteAddresses,
+              localAddresses,
+            ),
+          );
+          return true;
+        },
       }),
+    dhtStats: () => dhtStatsSnapshot(dht),
     log: options.log,
     now,
     observe: options.observe,
@@ -244,9 +264,10 @@ async function openAndBridge(
 }
 
 export function createPublisherConnection(options: {
-  connect: () => DhtStream;
+  connect: (observe: EmitObservation) => DhtStream;
   connectTimeoutMs?: number;
   createMuxSubscriber?: typeof createMuxSubscriber;
+  dhtStats?: () => unknown;
   log?: (line: string) => void;
   now: () => number;
   observe?: Observe;
@@ -287,6 +308,7 @@ export function createPublisherConnection(options: {
             ? "stream.error"
             : "stream.close",
         ...(streamError ? { error: streamError } : {}),
+        ...(options.dhtStats ? { dht: options.dhtStats() } : {}),
       });
       if (!stopped) {
         options.log?.("Publisher connection closed; reconnecting");
@@ -313,7 +335,7 @@ export function createPublisherConnection(options: {
       route: options.route,
     });
     observe("outer.attempt", { attempt });
-    const outer = options.connect();
+    const outer = options.connect(observe);
     connectingOuter = outer;
     const reportHandshake = observeHandshake(
       outer,
@@ -338,6 +360,7 @@ export function createPublisherConnection(options: {
         attempt,
         attemptElapsedMs: options.now() - attemptStartedAt,
         transport: dhtStreamSnapshot(outer),
+        ...(options.dhtStats ? { dht: options.dhtStats() } : {}),
       });
       return {
         observe,
@@ -369,6 +392,7 @@ export function createPublisherConnection(options: {
         error: failure.message,
         attempt,
         attemptElapsedMs: options.now() - attemptStartedAt,
+        ...(options.dhtStats ? { dht: options.dhtStats() } : {}),
       });
       onFailure?.(observe);
       outer.destroy();

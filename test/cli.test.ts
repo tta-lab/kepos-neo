@@ -19,6 +19,7 @@ interface Calls {
   startSubscriber: unknown[];
   subscriberLocks: string[];
   stopped: string[];
+  configPaths: Array<string | undefined>;
 }
 
 function fakeCli(): {
@@ -37,12 +38,17 @@ function fakeCli(): {
     startSubscriber: [],
     subscriberLocks: [],
     stopped: [],
+    configPaths: [],
   };
   const stdout: string[] = [];
   const stderr: string[] = [];
   const dependencies: CliDependencies = {
     stdout: (line) => stdout.push(line),
     stderr: (line) => stderr.push(line),
+    loadConfig: async (configPath) => {
+      calls.configPaths.push(configPath);
+      return undefined;
+    },
     setupPublisher: async (options) => {
       calls.setupPublisher.push(options);
       return { created: true, publisherKey: "11".repeat(32) };
@@ -266,6 +272,54 @@ test("publisher run prints human status and awaits signal-safe stop", async () =
   assert.match(cli.stdout.join("\n"), /Publisher running/);
   assert.match(cli.stdout.join("\n"), /outer\.connected/);
   assert.match(cli.stdout.join("\n"), /attempt=2/);
+});
+
+test("run commands use TOML bootstrap unless the CLI overrides it", async () => {
+  const cli = fakeCli();
+  cli.dependencies.loadConfig = async (configPath) => {
+    cli.calls.configPaths.push(configPath);
+    return {
+      network: {
+        bootstrap: [{ host: "config.example.com", port: 49_737 }],
+      },
+    };
+  };
+
+  await runCli(
+    [
+      "subscriber",
+      "run",
+      "--state",
+      "./subscriber",
+      "--config",
+      "./kepos.toml",
+    ],
+    cli.dependencies,
+  );
+  await runCli(
+    [
+      "publisher",
+      "run",
+      "--state",
+      "./publisher",
+      "--bootstrap",
+      "cli.example.com:49738",
+    ],
+    cli.dependencies,
+  );
+
+  assert.deepEqual(cli.calls.configPaths, [
+    path.resolve("./kepos.toml"),
+    undefined,
+  ]);
+  assert.deepEqual(
+    (cli.calls.startSubscriber[0] as { bootstrap: unknown }).bootstrap,
+    [{ host: "config.example.com", port: 49_737 }],
+  );
+  assert.deepEqual(
+    (cli.calls.startPublisher[0] as { bootstrap: unknown }).bootstrap,
+    [{ host: "cli.example.com", port: 49_738 }],
+  );
 });
 
 test("subscriber run maps services and writes NDJSON observations", async () => {

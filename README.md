@@ -115,9 +115,22 @@ npm run kepos -- subscriber set-publisher \
   --publisher-key <publisher-public-key>
 ```
 
-Both run commands accept repeated `--bootstrap host:port` options. Omitting
-them retains HyperDHT's built-in bootstrap set. An explicit list replaces that
-set:
+Both run commands read network settings from
+`$XDG_CONFIG_HOME/kepos/config.toml`, or `~/.config/kepos/config.toml` when
+`XDG_CONFIG_HOME` is unset:
+
+```toml
+[network]
+bootstrap = [
+  "47.94.213.63:49737",
+  "203.91.75.19:49738",
+]
+```
+
+Use `--config <path>` to select another file. A missing default file retains
+HyperDHT's built-in bootstrap set; a missing explicit file is an error. Both
+run commands also accept repeated `--bootstrap host:port` options, which
+replace the TOML list for that invocation:
 
 ```sh
 npm run kepos -- subscriber run \
@@ -133,7 +146,8 @@ HyperDHT crawling, geographic reports, candidate validation, and regional
 bootstrap benchmarks live in
 [`tta-lab/hyperdht-observatory`](https://github.com/tta-lab/hyperdht-observatory).
 Kepos does not fetch or trust Observatory output at runtime; operators review
-and pass any chosen endpoints explicitly with `--bootstrap`.
+and put chosen endpoints in the TOML config or pass them explicitly with
+`--bootstrap`.
 
 Run one local HTTP gateway plus any raw TCP listeners:
 
@@ -185,6 +199,11 @@ Their `udx` fields include live RTT, congestion window, in-flight packet,
 timeout, retransmit, recovery, and byte/packet counters. These are sanitized
 diagnostics whose shape may change; do not treat them as a stable API or copy
 state files into logs.
+
+When HyperDHT attempts a punch, `outer.holepunch` records the local and remote
+firewall classes (`open`, `consistent`, `random`, or `unknown`) and only the
+number of candidate addresses. Connection and close events also include
+cumulative DHT punch and relay counters. No candidate IP addresses are logged.
 
 The command prints the local Home URL immediately and keeps the gateway and raw
 TCP listeners bound while the publisher is unavailable. Connection attempts
