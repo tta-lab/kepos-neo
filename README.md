@@ -15,6 +15,61 @@ independent Protomux channels for Home, SSH, Navidrome, and other services.
 Install dependencies with `npm ci`. Use the canonical `kepos` CLI below to
 create publisher and subscriber state.
 
+## Nix publisher
+
+The flake exports a Linux CLI package and a Home Manager publisher module. A
+consumer flake can follow its existing Nixpkgs and Home Manager inputs:
+
+```nix
+inputs.kepos-neo = {
+  url = "github:tta-lab/kepos-neo";
+  inputs.nixpkgs.follows = "nixpkgs";
+  inputs.home-manager.follows = "home-manager";
+};
+```
+
+Import and configure the module in a Home Manager configuration:
+
+```nix
+{
+  inputs,
+  ...
+}: {
+  imports = [inputs.kepos-neo.homeManagerModules.default];
+
+  services.kepos.publisher = {
+    enable = true;
+    bootstrap = ["47.94.213.63:49737"];
+    displayName = "kosmos";
+    allow = ["<subscriber-public-key>"];
+    services = {
+      ssh = {
+        name = "SSH";
+        targetPort = 22;
+      };
+      navidrome = {
+        name = "Navidrome";
+        targetPort = 4533;
+      };
+    };
+  };
+}
+```
+
+On first start, the user service creates the publisher identity in `stateDir`,
+which defaults to `$XDG_STATE_HOME/kepos-neo/publisher`. If complete publisher
+state already exists, it is reused without rotation. A partial state directory
+fails closed. Bootstrap endpoints, allowlist, display name, and services are
+generated as public TOML policy; private keys never enter the Nix store. Empty
+`allow` denies all subscribers, empty `services` publishes Home only, and empty
+`bootstrap` uses HyperDHT defaults.
+
+The package and CLI app are also available directly:
+
+```sh
+nix run github:tta-lab/kepos-neo -- --help
+```
+
 ## Identity and keys
 
 Every publisher and subscriber has a cryptographic public/private key pair.
