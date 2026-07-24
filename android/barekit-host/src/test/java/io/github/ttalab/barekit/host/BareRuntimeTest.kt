@@ -13,6 +13,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertArrayEquals
@@ -69,10 +71,24 @@ class BareRuntimeTest {
           put("echoUrl", "http://127.0.0.1:17482/")
           put("subscriberPublicKey", "cd".repeat(32))
           put("configured", true)
-          put("connection", "connecting")
-          put("homeUrl", "http://home.localhost:17480/")
-          put("navidromeUrl", "http://navidrome.localhost:17480/")
-          put("navidromeFallbackUrl", "http://127.0.0.1:17481/")
+          put("connection", "connected")
+          putJsonObject("publisher") {
+            put("displayName", "kosmos")
+            put("publisherKey", "ab".repeat(32))
+          }
+          putJsonArray("services") {
+            add(buildJsonObject {
+              put("id", "navidrome")
+              put("name", "Navidrome")
+              put("access", "http")
+              put("url", "http://navidrome.localhost:17480/")
+            })
+            add(buildJsonObject {
+              put("id", "ssh")
+              put("name", "SSH")
+              put("access", "tcp")
+            })
+          }
         },
       ),
     )
@@ -86,10 +102,17 @@ class BareRuntimeTest {
         "http://127.0.0.1:17482/",
         subscriberPublicKey = "cd".repeat(32),
         configured = true,
-        connection = "connecting",
-        homeUrl = "http://home.localhost:17480/",
-        navidromeUrl = "http://navidrome.localhost:17480/",
-        navidromeFallbackUrl = "http://127.0.0.1:17481/",
+        connection = "connected",
+        publisher = PublisherSnapshot("kosmos", "ab".repeat(32)),
+        services = listOf(
+          ServiceSnapshot(
+            id = "navidrome",
+            name = "Navidrome",
+            access = "http",
+            url = "http://navidrome.localhost:17480/",
+          ),
+          ServiceSnapshot(id = "ssh", name = "SSH", access = "tcp"),
+        ),
       ),
       runtime.snapshot(),
     )
@@ -382,9 +405,6 @@ class BareRuntimeTest {
       put("subscriberPublicKey", "cd".repeat(32))
       put("configured", configured)
       put("connection", connection)
-      put("homeUrl", "http://home.localhost:17480/")
-      put("navidromeUrl", "http://navidrome.localhost:17480/")
-      put("navidromeFallbackUrl", "http://127.0.0.1:17481/")
     },
   )
 

@@ -88,12 +88,19 @@ subscriber identity in app-private storage. Each installation must generate its
 own subscriber identity; copying a secret identity would make two installations
 impersonate the same subscriber. Public keys may be copied and displayed freely.
 
-## Experimental Android subscriber
+## Android subscriber
 
-The Android app is a subscriber-only arm64 spike. A Kotlin foreground service
+The sideload-only Android app is a subscriber-only arm64 client. A Kotlin foreground service
 owns one Bare Worklet, and that Worklet runs the same HyperDHT/Protomux
 subscriber core as the CLI. It does not install a VPN, TUN interface, or system
 DNS service.
+
+After setup, the dark service home reads the publisher's real Registry and
+shows its display name and published services. It hides the synthetic Home
+entry: known web services open through their `*.localhost` URL, Navidrome copies
+its URL for first-time Navic setup, and unknown or TCP services show a usage note. Publisher
+keys, diagnostics, reconfiguration, and runtime controls live under Settings.
+During reconnect, the last known service list stays visible but disabled.
 
 Build or install the debug app:
 
@@ -121,16 +128,17 @@ installed `io.github.ttalab.kepos` app and its state.
 
 The app generates its subscriber identity in app-private storage. Add the
 displayed public key to the publisher allowlist, paste the publisher public key
-into the app, and keep the foreground service running. Navidrome is then
-available to Android clients at:
+into the app, and keep the foreground service running. An explicit Stop remains
+in effect when the Activity is reopened; Start clears that choice. The Navidrome card copies
+the canonical local URL:
 
 ```text
 http://navidrome.localhost:17480/
-http://127.0.0.1:17481/
 ```
 
-The second URL is a direct loopback fallback for clients that do not resolve
-`*.localhost`. Both use the same publisher connection. This is not yet a Play
+The runtime also keeps `127.0.0.1:17481` as an internal compatibility listener
+for clients that cannot resolve `*.localhost`; it is not the product-facing
+address. Both routes use the same publisher connection. This is not yet a Play
 Store release, and foreground-service policy remains unresolved.
 
 ## Persistent multiplex CLI

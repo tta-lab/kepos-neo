@@ -30,6 +30,9 @@ test("Android host boundaries are explicit extraction seams", async () => {
   const mainActivity = await readProjectFile(
     "android/app/src/main/java/io/github/ttalab/kepos/MainActivity.kt",
   );
+  const notificationIcon = await readProjectFile(
+    "android/app/src/main/res/drawable/ic_kepos_notification.xml",
+  );
   const subscriberRuntime = await readProjectFile("src/runtime/subscriber.ts");
   const gateway = await readProjectFile("src/home/gateway.ts");
   const bareKitSession = await readProjectFile(
@@ -86,6 +89,8 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.match(mainActivity!, /Manifest\.permission\.POST_NOTIFICATIONS/);
   assert.match(foregroundService!, /private val runtime = BareRuntime/);
   assert.match(foregroundService!, /START_STICKY/);
+  assert.match(foregroundService!, /R\.drawable\.ic_kepos_notification/);
+  assert.match(notificationIcon!, /M15,9H4V31H15M25,9H36V31H25M10,20H30/);
   assert.match(foregroundService!, /filesDir\.resolve\("subscriber"\)/);
   assert.match(foregroundService!, /BuildConfig\.GATEWAY_PORT/);
   assert.match(foregroundService!, /BuildConfig\.NAVIDROME_PORT/);
@@ -134,7 +139,7 @@ test("Android device commands isolate tests and preserve installed state", async
   assert.match(readme!, /preserving app-private state/);
 });
 
-test("Android subscriber waits for startup and exposes both local HTTP URLs", async () => {
+test("Android subscriber waits for startup and exposes the real service registry", async () => {
   const worklet = await readProjectFile("src/android/worklet/main.ts");
   const runtimeState = await readProjectFile(
     "android/barekit-host/src/main/java/io/github/ttalab/barekit/host/RuntimeStateMachine.kt",
@@ -147,8 +152,11 @@ test("Android subscriber waits for startup and exposes both local HTTP URLs", as
   );
 
   assert.match(worklet!, /await connectTask/);
-  assert.match(worklet!, /homeUrl/);
-  assert.match(runtimeState!, /val homeUrl: String\?/);
-  assert.match(screen!, /Copy Home URL/);
+  assert.match(worklet!, /readHomeRegistry/);
+  assert.match(worklet!, /createAndroidRegistrySnapshot/);
+  assert.match(runtimeState!, /val publisher: PublisherSnapshot\?/);
+  assert.match(runtimeState!, /val services: List<ServiceSnapshot>/);
+  assert.match(screen!, /Your services/);
+  assert.doesNotMatch(screen!, /Copy Home URL/);
   assert.doesNotMatch(evidence!, /124\.160\.204\.171/);
 });

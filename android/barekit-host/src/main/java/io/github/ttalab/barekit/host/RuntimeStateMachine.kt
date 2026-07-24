@@ -8,6 +8,18 @@ enum class RuntimeState {
   FAILED,
 }
 
+data class PublisherSnapshot(
+  val displayName: String,
+  val publisherKey: String,
+)
+
+data class ServiceSnapshot(
+  val id: String,
+  val name: String,
+  val access: String,
+  val url: String? = null,
+)
+
 data class RuntimeSnapshot(
   val state: RuntimeState,
   val runtimeId: String? = null,
@@ -16,9 +28,8 @@ data class RuntimeSnapshot(
   val subscriberPublicKey: String? = null,
   val configured: Boolean = false,
   val connection: String? = null,
-  val homeUrl: String? = null,
-  val navidromeUrl: String? = null,
-  val navidromeFallbackUrl: String? = null,
+  val publisher: PublisherSnapshot? = null,
+  val services: List<ServiceSnapshot> = emptyList(),
 )
 
 data class StartDecision(val runtimeId: String, val shouldCreate: Boolean)
@@ -52,9 +63,8 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
     subscriberPublicKey: String? = null,
     configured: Boolean = false,
     connection: String? = null,
-    homeUrl: String? = null,
-    navidromeUrl: String? = null,
-    navidromeFallbackUrl: String? = null,
+    publisher: PublisherSnapshot? = null,
+    services: List<ServiceSnapshot> = emptyList(),
   ) {
     requireCurrent(runtimeId)
     check(current.state == RuntimeState.STARTING || current.state == RuntimeState.RUNNING) {
@@ -67,9 +77,8 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
       subscriberPublicKey = subscriberPublicKey,
       configured = configured,
       connection = connection,
-      homeUrl = homeUrl,
-      navidromeUrl = navidromeUrl,
-      navidromeFallbackUrl = navidromeFallbackUrl,
+      publisher = publisher,
+      services = services,
     )
   }
 

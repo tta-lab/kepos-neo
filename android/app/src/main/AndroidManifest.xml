@@ -7,7 +7,9 @@
   <application
     android:name=".KeposApplication"
     android:allowBackup="false"
+    android:icon="@drawable/kepos_icon"
     android:label="Kepos"
+    android:roundIcon="@drawable/kepos_icon"
     android:supportsRtl="true"
     android:theme="@style/Theme.Kepos">
     <activity

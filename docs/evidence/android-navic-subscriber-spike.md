@@ -54,6 +54,36 @@ The test publisher key is intentionally unreachable. This verifies the offline
 side of the lifecycle without treating it as evidence of successful NAT
 traversal.
 
+### Service-first UI gate (2026-07-23)
+
+The production debug package was updated in place on the same Pixel 7a. After
+reconnecting, the native service home read the live publisher Registry and
+showed the publisher display name plus Forgejo, Navidrome, SSH, and Woodpecker
+in publisher order. It hid Home, used the same portal mark as `kepos-web`, and
+showed `http://navidrome.localhost:17480/` as Navidrome's Copy URL action.
+The compact service directory keeps all four cards and their secondary text in
+the Pixel 7a's initial viewport without scrolling while retaining 48 dp action
+targets.
+Newsreader and IBM Plex Sans/Mono are bundled with their OFL license texts;
+service and action symbols use the pinned Compose Lucide package.
+
+The isolated device gate now also checks that:
+
+- service actions use the real Registry URLs, including the secondary Copy
+  address action;
+- publisher controls and diagnostics stay in Settings;
+- a failed runtime can open Diagnostics and retry;
+- reconnect keeps known services visible while disabling their actions;
+- initial setup copies the subscriber key needed for publisher allowlisting;
+- connecting keeps Settings and publisher reconfiguration reachable;
+- explicit Stop remains stopped across Activity recreation until Start;
+- unknown service IDs remain TCP unless Kepos recognizes them as web services;
+- Activity recreation keeps the same Worklet runtime and loopback listeners.
+
+Android 16 required AndroidX Test 1.7.0 and Espresso 3.7.0. The device test
+grants its own notification permission so a previous manual choice cannot
+change the result.
+
 On 2026-07-22, `adb install -r` updated the dogfood app to the heartbeat build
 without uninstalling it. The subscriber public-key fingerprint before and
 after the update was identical, confirming that the app-private identity was
@@ -62,9 +92,10 @@ the generated bundle and contained `kepos/control/1` and the heartbeat timeout
 path. The isolated `npm run android:device-check` gate then passed again on the
 same device without replacing or stopping the dogfood package.
 
-`npm run check` also passed 129 tests with 96.92% line, 84.69% branch, and
-92.24% function coverage. `npm run android:check` passed Kotlin/JVM tests, lint,
-the Bare bundle, and debug assembly.
+`npm run check` also passed 155 tests and its coverage thresholds.
+`npm run android:check` passed Kotlin/JVM tests, lint, the Bare bundle, and debug
+assembly. The full isolated device gate passed 8/8 on the Pixel 7a and again on
+an API 35 arm64 emulator after the review fixes.
 
 The arm64-only debug APK is 89 MiB. Before applying the intended spike ABI
 filter, one APK contained four copies of Bare Kit and its addons and was 345

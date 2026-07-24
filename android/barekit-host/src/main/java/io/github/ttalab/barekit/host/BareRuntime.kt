@@ -11,6 +11,8 @@ import java.util.concurrent.CompletableFuture
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
@@ -212,12 +214,24 @@ class BareRuntime(
       subscriberPublicKey = data["subscriberPublicKey"]?.jsonPrimitive?.content,
       configured = data["configured"]?.jsonPrimitive?.booleanOrNull ?: false,
       connection = data["connection"]?.jsonPrimitive?.content,
-      homeUrl = data["homeUrl"]?.jsonPrimitive?.content,
-      navidromeUrl = data["navidromeUrl"]?.jsonPrimitive?.content,
-      navidromeFallbackUrl = data["navidromeFallbackUrl"]?.jsonPrimitive?.content,
+      publisher = data["publisher"]?.jsonObject?.let(::parsePublisher),
+      services = data["services"]?.jsonArray?.map { parseService(it.jsonObject) }
+        ?: emptyList(),
     )
     notifyObservers()
   }
+
+  private fun parsePublisher(data: JsonObject): PublisherSnapshot = PublisherSnapshot(
+    displayName = data.getValue("displayName").jsonPrimitive.content,
+    publisherKey = data.getValue("publisherKey").jsonPrimitive.content,
+  )
+
+  private fun parseService(data: JsonObject): ServiceSnapshot = ServiceSnapshot(
+    id = data.getValue("id").jsonPrimitive.content,
+    name = data.getValue("name").jsonPrimitive.content,
+    access = data.getValue("access").jsonPrimitive.content,
+    url = data["url"]?.jsonPrimitive?.content,
+  )
 
   private fun receiveResponse(runtimeId: String, response: ResponseEnvelope) {
     requests.accept(response)
